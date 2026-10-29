@@ -2,7 +2,7 @@ import struct,sys,bisect,collections
 from capstone import *
 from capstone.ppc import *
 S=sys.argv[1]
-d=open('private-image/image.bin','rb').read(); B=0x82000000; CS,CE=0x821F0000,0x8311C4F4
+d=open(S+'/image.bin','rb').read(); B=0x82000000; CS,CE=0x82280000,0x8356A84C
 funcs=sorted(int(x,16) for x in open(S+'/funcs.txt').read().split())
 # plus entries already in the config
 import re
@@ -13,9 +13,9 @@ def sx(v,b): return v-(1<<b) if v&(1<<(b-1)) else v
 def owner(v):
     k=bisect.bisect_right(funcs,v)-1; return funcs[k],(funcs[k+1] if k+1<len(funcs) else CE)
 WIDE=len(sys.argv)>2
-HELP=(0x82FF9600,0x82FFD000)
+HELP=((0x82313560,0x823136A4),(0x82316400,0x82316580),(0x8272CF00,0x8272D800))
 def orphan(v):
-    if v in fs or not(CS<=v<CE) or v%4 or HELP[0]<=v<HELP[1]: return False
+    if v in fs or not(CS<=v<CE) or v%4 or any(h0<=v<h1 for h0,h1 in HELP): return False
     x=w(v)
     if x==0 or x>>24 in(1,2): return False
     q=v-4
@@ -63,7 +63,7 @@ for i,x in enumerate(W):
     a=B+i*4
     if not(CS<=a<CE) or x>>26!=15 or (x>>16)&31: continue
     hi=(x&0xFFFF)<<16
-    if not(0x821E0000<=hi<=0x83120000): continue
+    if not(0x82270000<=hi<=0x83570000): continue
     rd=(x>>21)&31
     for k in range(1,400):
         b=a+4*k

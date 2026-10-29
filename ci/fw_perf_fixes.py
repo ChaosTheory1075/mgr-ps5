@@ -3,7 +3,7 @@
 # generic Xenos/Vulkan path): its GPU command thread work, which took Crackdown
 # from 20-40 to 40-60 FPS. Left out: 0013 (patch_framework.py has the same
 # exp_adjust fix), readback_resolve_max_bytes (patch_framework.py limits
-# readback to 256 KB), the XMA, save and DLC fixes (MGR has its own XMA port).
+# readback to 256 KB), the XMA, save and DLC fixes (the game has the MP3 port's XMA fixes).
 # Order: ci/pc_patches.py fw cd (on the pristine framework), ci/patch_framework.py fw,
 # then this:  python3 ci/fw_perf_fixes.py fw cd
 #
@@ -30,7 +30,7 @@
 #   aren't copied back into guest memory. The PC recomp's crackdown.toml sets
 #   256 KB (CrackdownApp::OnPreSetup does here); copying every full-screen
 #   resolve into the write-watched guest memory cost the GPU thread most.
-# - gta4-ps5's sound mixer decodes an MGR from memory: streaming it from the
+# - gta4-ps5's sound mixer decodes an MP3 from memory: streaming it from the
 #   app's drive inside the 5 ms audio deadline made the menu's song stutter.
 import os
 import re
@@ -529,7 +529,7 @@ print("cpu layout: the GPU command thread on a core of its own")
 sound = fw / sdk / "gta4-recomp/src/ps5/game/sound.cpp"
 text = sound.read_text(encoding="utf-8")
 old = """  bool Open(const std::filesystem::path& f) {
-    if (!drmp3_init_file(&mgr_, f.string().c_str(), nullptr)) return false;"""
+    if (!drmp3_init_file(&mp3_, f.string().c_str(), nullptr)) return false;"""
 new = """  bool Open(const std::filesystem::path& f) {
     // (from memory: reading the drive in the audio thread misses its deadline)
     std::FILE* file = std::fopen(f.string().c_str(), "rb");
@@ -540,19 +540,19 @@ new = """  bool Open(const std::filesystem::path& f) {
     data_.resize(size > 0 ? size_t(size) : 0);
     const bool read = !data_.empty() && std::fread(data_.data(), 1, data_.size(), file) == data_.size();
     std::fclose(file);
-    if (!read || !drmp3_init_memory(&mgr_, data_.data(), data_.size(), nullptr)) return false;"""
-assert text.count(old) == 1, "sound.cpp: Mgr::Open changed"
+    if (!read || !drmp3_init_memory(&mp3_, data_.data(), data_.size(), nullptr)) return false;"""
+assert text.count(old) == 1, "sound.cpp: Mp3::Open changed"
 text = text.replace(old, new)
 old = """ private:
-  drmp3 mgr_{};"""
-assert text.count(old) == 1, "sound.cpp: Mgr's members changed"
+  drmp3 mp3_{};"""
+assert text.count(old) == 1, "sound.cpp: Mp3's members changed"
 text = text.replace(old, """ private:
   std::vector<uint8_t> data_;
-  drmp3 mgr_{};""")
+  drmp3 mp3_{};""")
 if "#include <vector>" not in text:
     text = text.replace("#include <string>\n", "#include <string>\n#include <vector>\n", 1)
 sound.write_text(text, encoding="utf-8")
-print("sound.cpp: MGRs decoded from memory")
+print("sound.cpp: MP3s decoded from memory")
 
 # Achievements: the fork's XGIUserWriteAchievements took only GTA IV's ids (1-65), so Crackdown's
 # first unlocks (ids 67 and on) were refused. Any id in the title's own list is taken now.
