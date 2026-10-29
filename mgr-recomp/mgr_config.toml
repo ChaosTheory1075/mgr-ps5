@@ -132,3 +132,8 @@ large_function_threshold = 1048576
 "0x8308CCB0" = {}
 "0x830C21A8" = {}
 "0x8311AB00" = {}
+
+# Entries whose address the code builds (lis/addi) right after a branch within the function before
+# them (827818F0 is a thunk, b 82664170: "Call to invalid or unregistered function" on the PS5).
+"0x827617C0" = {}
+"0x827818F0" = {}

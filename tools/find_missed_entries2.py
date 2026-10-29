@@ -14,7 +14,7 @@ def owner(v):
     k=bisect.bisect_right(funcs,v)-1; return funcs[k],(funcs[k+1] if k+1<len(funcs) else CE)
 WIDE=len(sys.argv)>2
 HELP=((0x82313560,0x823136A4),(0x82316400,0x82316580),(0x8272CF00,0x8272D800))
-def orphan(v):
+def orphan(v,code=False):
     if v in fs or not(CS<=v<CE) or v%4 or any(h0<=v<h1 for h0,h1 in HELP): return False
     x=w(v)
     if x==0 or x>>24 in(1,2): return False
@@ -23,6 +23,8 @@ def orphan(v):
     p=w(q)
     if WIDE and (p>>26)==18 and (p&3)==1: return True   # after a call that doesn't return
     if (p>>26)==18 and (p&3)==0:
+        # (an address the code builds: any unconditional b before it will do)
+        if code: return True
         f,n=owner(v); t=(v-4)+sx(p&0x3FFFFFC,26); return not(f<=t<n)
     return p in(0x4E800420,0x4E800020)
 # branch targets inside the image (a candidate reached by a branch is a label)
@@ -72,7 +74,7 @@ for i,x in enumerate(W):
         if op in(14,24) and (j>>16)&31==rd:
             v=(hi+sx(j&0xFFFF,16))&0xFFFFFFFF if op==14 else hi|(j&0xFFFF)
             f,n=owner(v)
-            if orphan(v) and not(f<=a<n) and v not in btgt: src[v].add('code')
+            if orphan(v,code=True) and not(f<=a<n) and v not in btgt: src[v].add('code')
         if rd in writes(j): break
         if j in(0x4E800020,0x4E800420) or (op==18 and not(j&1)): break
 out=sorted(src)
