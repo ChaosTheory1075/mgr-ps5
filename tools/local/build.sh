@@ -21,7 +21,7 @@ GTA4_PS5_REPO=https://github.com/elripalda/gta4-ps5
 CD_PC_REPO=https://github.com/saulob/crackdown-xbox360-recompiled
 CD_PC_COMMIT=33ab1b632e38cb5c1c39a3d56c479537b9e0d185
 # the disc's default.xex and Title Update 4's default.xexp
-XEX_SHA1=TBD
+XEX_SHA1=2dffd4d46e727d4a64c331d54251c4d9a0a26edf
 XEXP_SHA1=4320595b58c28eb801e457361a4659ea1e1b2586
 MGR_XEX=${MGR_XEX:-$repo/../Extras/game/default.xex}
 MGR_XEXP=${MGR_XEXP:-$repo/../Extras/TU4/default.xexp}
