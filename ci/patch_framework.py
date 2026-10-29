@@ -110,6 +110,25 @@ def main():
          "  line.Add(\"\\n\");\n"
          "  const char* path = log_path[0] ? log_path : \"/app0/logs/crash.log\";\n")
 
+    # A thread created without a processor (proc_mask 0) stays on its
+    # creator's hardware thread, as on the Xbox 360 ("all child threads stay
+    # on the same hardware thread as the parent"), and the title's first
+    # thread starts on hardware thread 0. The framework handed out 1, 2, ...
+    # round-robin, the host's own threads included: the main thread came out
+    # as 4, and Metal Gear Rising's job system, which maps hardware threads
+    # 0, 1, 2, 3 and 5 to its workers (the PCR's current CPU at 0x10C), looked
+    # up -1 for it and crashed before the title screen. (Only what the guest
+    # sees: ignore_thread_affinities keeps the host's scheduling as it is.)
+    edit(sdk / "src" / "system" / "xthread.cpp",
+         "  if (!proc_mask) {\n"
+         "    next_cpu = (next_cpu + 1) % 6;\n"
+         "    return next_cpu;  // is this reasonable?\n",
+         "  if (!proc_mask) {\n"
+         "    // [mgr] the creator's hardware thread; 0 for the title's first thread\n"
+         "    (void)next_cpu;\n"
+         "    auto* creator = XThread::GetCurrentThread();\n"
+         "    return (creator && creator->is_guest_thread()) ? creator->active_cpu() : 0;\n")
+
     # XamSwapDisc reaches an app that defines rex_app_swap_disc (Max Payne 3's
     # disc 2); without one (this game has one disc), the stub as before.
     xam_info = sdk / "src" / "kernel" / "xam" / "xam_info.cpp"
