@@ -50,10 +50,6 @@
 
 #include "gta4_install_io.h" /* GTA IV for PS5's install reading and writing (include/) */
 
-#define XXH_INLINE_ALL
-#include "xxhash.h"
-#include <zlib.h>
-#include "mgr_textures_core.h" /* Metal Gear Rising: Revengeance's HD textures from the Nexus pack (the app's, copied in) */
 
 #include <algorithm>
 #include <atomic>
@@ -1249,108 +1245,6 @@ int package(const std::string &job)
     log_line("done in %.0f s", now_s() - g.t0);
     return 0;
 }
-/* ---- Metal Gear Rising: Revengeance's HD textures ---------------------------------------------------------
- *     kind=textures
- *     staging=UserData/mgr/.install-staging
- *     list=hub/mgr-textures.txt                      (the app's list of them)
- *     files=UserData/mgr/.install-job/texture-files.txt
- *                                                    ("<source in the list, hex> <path in the app>",
- *                                                     the copies of each file the app found)
- *     needed=<bytes the install needs free>
- * The textures go into <staging>/textures (mgr_textures_core.h); the app moves them into place. */
-int textures(const std::string &job)
-{
-    const std::string staging_rel = field(job, "staging"), list_rel = field(job, "list"),
-                      files_rel = field(job, "files");
-    const std::uint64_t needed = std::strtoull(field(job, "needed").c_str(), nullptr, 10);
-    if (staging_rel != kStagingRel || !recomp::zip::safe_name(list_rel) || !recomp::zip::safe_name(files_rel))
-        return fail("The install job is damaged. Start the install again.");
-    const std::string staging = g_app + "/" + staging_rel, target = staging + "/textures";
-    drive_of(g_app);
-    log_line("started (pid %d): HD textures into %s (%s, %s free)", int(getpid()), target.c_str(), g.drive.c_str(),
-             mb(g.free).c_str());
-
-    set_phase("reading", 1);
-    mgrtex::Manifest m;
-    if (!mgrtex::LoadManifest(g_app + "/" + list_rel, m))
-        return fail("The app's HD texture list couldn't be read.");
-    std::string files;
-    if (!read_text(g_app + "/" + files_rel, files))
-        return fail("The list of the texture pack's files couldn't be read.");
-    {
-        size_t at = 0;
-        while (at < files.size())
-        {
-            size_t end = files.find('\n', at);
-            if (end == std::string::npos)
-                end = files.size();
-            const std::string line = files.substr(at, end - at);
-            at = end + 1;
-            const size_t space = line.find(' ');
-            if (space == std::string::npos)
-                continue;
-            const size_t idx = std::strtoul(line.substr(0, space).c_str(), nullptr, 16);
-            const std::string rel = line.substr(space + 1);
-            if (idx < m.sources.size() && recomp::zip::safe_name(rel))
-                m.sources[idx].found.push_back(g_app + "/" + rel);
-        }
-    }
-    size_t usable = 0;
-    const std::uint64_t total = mgrtex::UsableBytes(m, &usable);
-    if (!usable)
-        return fail("None of the texture pack's files were found.");
-    g.copy_total = total;
-
-    if (g_cancel.load())
-        return fail("Stopped.");
-    set_phase("clearing", 1);
-    std::string error;
-    {
-        std::uint64_t removed = 0;
-        if (!remove_tree(staging, removed, error))
-            return fail("The files of an earlier install couldn't be removed (" + error + ").");
-    }
-    recomp::zip::make_dirs(target);
-    {
-        const std::string mark = staging + "/.token";
-        const int fd = ::open(mark.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
-        const bool ok = fd >= 0 && write_all(fd, reinterpret_cast<const std::uint8_t *>(g.token.data()), g.token.size());
-        if (fd >= 0)
-            ::close(fd);
-        if (!ok)
-            return fail("Couldn't write in the app's folder. Is the drive full?");
-    }
-    drive_of(g_app);
-    if (needed && g.free && g.free < needed)
-        return fail("There isn't enough free space. It needs about " + mb(needed) + " and the drive has " +
-                        mb(g.free) + " free.",
-                    staging);
-
-    const double t1 = now_s();
-    set_phase("copying", 1);
-    log_line("making %zu HD textures (%s) from %zu files", usable, mb(total).c_str(), m.sources.size());
-    size_t written = 0, bad = 0;
-    if (!mgrtex::Build(m, target, g.copy_done, &g_cancel, written, bad, error))
-        return fail(error, staging);
-    const double copy_s = now_s() - t1;
-    log_line("made %zu HD textures (%zu didn't match the list) in %.1f s (%.0f MB/s)", written, bad, copy_s,
-             copy_s > 0 ? double(g.copy_done) / 1048576.0 / copy_s : 0.0);
-    if (!written)
-        return fail("None of the HD textures could be made: the pack's files aren't the ones the list was made from.",
-                    staging);
-
-    set_phase("syncing", 1);
-    sync();
-    if (g_cancel.load())
-        return fail("Stopped.", staging);
-    {
-        std::lock_guard<std::mutex> l(g.m);
-        g.phase = "done";
-    }
-    write_status();
-    log_line("done in %.0f s", now_s() - g.t0);
-    return 0;
-}
 } // namespace
 
 int main()
@@ -1392,7 +1286,7 @@ int main()
     write_status();
     std::thread status(status_main);
     const std::string kind = field(job, "kind");
-    const int rc = kind == "package" ? package(job) : kind == "textures" ? textures(job) : install(job);
+    const int rc = kind == "package" ? package(job) : install(job);
     g_quit = true;
     status.join();
     write_status();

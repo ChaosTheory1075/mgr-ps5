@@ -17,7 +17,7 @@ if(PS5)
     # own sound mixer for its song.
     set(GTA4_PS5_SRC "${REXSDK_DIR}/gta4-recomp/src/ps5")
     set(MGR_PS5_FONTS "${REXSDK_DIR}/../../ps5/assets/fonts")
-    list(APPEND MGR_APP_SOURCES src/ps5/mgr_menu.cpp src/ps5/mgr_install.cpp src/ps5/mgr_textures_install.cpp src/ps5/mgr_trophies.cpp src/ps5/mgr_trophies_game.cpp
+    list(APPEND MGR_APP_SOURCES src/ps5/mgr_menu.cpp src/ps5/mgr_install.cpp src/ps5/mgr_trophies.cpp src/ps5/mgr_trophies_game.cpp
          "${GTA4_PS5_SRC}/game/sound.cpp" "${GTA4_PS5_SRC}/hub/hub_sfx.cpp")
     set_source_files_properties(src/ps5/mgr_menu.cpp PROPERTIES
         COMPILE_DEFINITIONS "MGRPS5_FONTS_DIR=\"${MGR_PS5_FONTS}\"")
@@ -39,10 +39,6 @@ if(PS5)
         ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty/stb
     )
     target_compile_options(mgr PRIVATE "SHELL:-include ${REXSDK_DIR}/include/rex/ps5_compat.h")
-    # zlib (the toolchain's), for the HD textures made on the console (mgr_textures_install.cpp)
-    set(MGR_ZLIB_ROOT "${PS5_PAYLOAD_SDK}/../zlib/root/usr")
-    target_include_directories(mgr PRIVATE "${MGR_ZLIB_ROOT}/include")
-    target_link_libraries(mgr PRIVATE "${MGR_ZLIB_ROOT}/lib/libz.a")
     target_link_libraries(mgr PRIVATE
         rex::runtime
         rexgpu-xenos

@@ -1,7 +1,7 @@
 // Metal Gear Rising: Revengeance - ReXGlue recompiled app.
 //
 // On the PS5 the app folder is /app0 (the homebrew folder): the game's files
-// in /app0/game (disc 1's files, with the title update's default.xexp beside
+// in /app0/game (the disc's files, with Title Update 4's default.xexp beside
 // default.xex), the title update's data in /app0/game/update, DLC packages in
 // /app0/dlc and saves in /app0/saves. It opens on the menu (ps5/mgr_menu.h);
 // achievements show as PS5 trophies (ps5/mgr_trophies.h).

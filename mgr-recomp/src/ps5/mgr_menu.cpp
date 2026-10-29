@@ -143,9 +143,6 @@ class Pad {
 // ---- the settings (app/menu.ini: key=value lines) ----
 
 struct Settings {
-  int disc = 1;  // 1 or 2
-  int fps = 30;  // 30 (locked, the Xbox 360's) or 60
-  bool hd_textures = true;
   bool fxaa = false;  // swap_post_effect: none or fxaa
   int filter = 3;     // anisotropic_override 2..5: 2x, 4x, 8x, 16x
   bool lane = true;   // the GPU's second lane (crackdown_gpu_lane)
@@ -162,9 +159,6 @@ struct Settings {
         int value = 0;
         if (std::sscanf(line, " %63[a-z_] = %d", key, &value) != 2) continue;
         const std::string k(key);
-        if (k == "frame_rate") s.fps = value == 60 ? 60 : 30;
-        if (k == "frame_rate_unlocked") s.fps = value ? 60 : 30;  // (the earlier menu's)
-        if (k == "hd_textures") s.hd_textures = value != 0;
         if (k == "fxaa") s.fxaa = value != 0;
         if (k == "texture_filtering") s.filter = std::clamp(value, 2, 5);
         if (k == "gpu_lane") s.lane = value != 0;
@@ -172,22 +166,13 @@ struct Settings {
       }
       std::fclose(f);
     }
-    // the disc: disc.txt (MgrApp's, also written when the game asks for the other disc)
-    if (std::FILE* f = std::fopen((app / "disc.txt").string().c_str(), "rb")) {
-      if (std::fgetc(f) == '2') s.disc = 2;
-      std::fclose(f);
-    }
     return s;
   }
 
   void Save(const fs::path& app) const {
     if (std::FILE* f = std::fopen((app / "menu.ini").string().c_str(), "wb")) {
-      std::fprintf(f, "frame_rate = %d\nhd_textures = %d\nfxaa = %d\ntexture_filtering = %d\ngpu_lane = %d\nmenu_music = %d\n",
-                   fps, hd_textures ? 1 : 0, fxaa ? 1 : 0, filter, lane ? 1 : 0, music);
-      std::fclose(f);
-    }
-    if (std::FILE* f = std::fopen((app / "disc.txt").string().c_str(), "wb")) {
-      std::fputc(disc == 2 ? '2' : '1', f);
+      std::fprintf(f, "fxaa = %d\ntexture_filtering = %d\ngpu_lane = %d\nmenu_music = %d\n", fxaa ? 1 : 0, filter,
+                   lane ? 1 : 0, music);
       std::fclose(f);
     }
   }
@@ -197,18 +182,13 @@ struct Settings {
     // (the Xbox 360's own resolution, always: 2x cost the PS5 far more than it showed)
     rex::cvar::SetFlagByName("draw_resolution_scale_x", "1");
     rex::cvar::SetFlagByName("draw_resolution_scale_y", "1");
-    rex::cvar::SetFlagByName("hd_textures", hd_textures ? "true" : "false");
-    // The game's frame lock (mgr_app.cpp): 2 vblanks a frame, as on the Xbox
-    // 360, or 1. The guest's vblanks follow the TV's 60 Hz either way.
-    rex::cvar::SetFlagByName("mgr_frame_lock", fps == 30 ? "2" : "1");
+    // (the game paces itself to 60, as on the Xbox 360: the TV's vblanks)
     rex::cvar::SetFlagByName("vsync", "true");
     rex::cvar::SetFlagByName("swap_post_effect", fxaa ? "fxaa" : "none");
     rex::cvar::SetFlagByName("anisotropic_override", std::to_string(filter));
     rex::cvar::SetFlagByName("crackdown_gpu_lane", lane ? "true" : "false");
-    REXLOG_INFO("Metal Gear Rising: Revengeance menu: disc {}, frame rate {}, HD textures {}, anti-aliasing {}, texture filtering {}, "
-                "the GPU's second lane {}",
-                disc, fps == 30 ? "30 (locked)" : "60", hd_textures ? "on" : "off", fxaa ? "FXAA" : "off",
-                kFilterNames[filter], lane ? "on" : "off");
+    REXLOG_INFO("Metal Gear Rising: Revengeance menu: anti-aliasing {}, texture filtering {}, the GPU's second lane {}",
+                fxaa ? "FXAA" : "off", kFilterNames[filter], lane ? "on" : "off");
   }
 };
 
@@ -266,7 +246,7 @@ const char* const kPageNames[kPages] = {"HOME", "CONTENT", "SAVES", "SETTINGS", 
 
 // The settings page's rows, in its order (a new option: a row here, its line
 // in SettingsLines and its change in ChangeSetting).
-enum SettingsRow { kDisc, kFrameRate, kTextures, kAntiAliasing, kFiltering, kLane, kMusic, kSettingsRows };
+enum SettingsRow { kAntiAliasing, kFiltering, kLane, kMusic, kSettingsRows };
 
 class MenuDialog final : public rex::ui::ImGuiDialog {
  public:
@@ -286,13 +266,9 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
       if (it->path().extension() == ".installing") fs::remove_all(it->path(), ec);
     ec.clear();
     Refresh();
-    REXLOG_INFO("Metal Gear Rising: Revengeance menu: disc 1 {}, disc 2 {}, Title Update 9 {}/{}, {} DLC packs, {} in install/",
-                installed_.disc[0] ? "installed" : "MISSING", installed_.disc[1] ? "installed" : "missing",
-                installed_.update[0] ? "yes" : "NO", installed_.update[1] ? "yes" : "no", installed_.dlc,
+    REXLOG_INFO("Metal Gear Rising: Revengeance menu: game {}, Title Update 4 {}, {} DLC packs, {} in install/",
+                installed_.game ? "installed" : "MISSING", installed_.update ? "yes" : "NO", installed_.dlc,
                 sources_.size());
-    has_disc2_ = fs::exists(app / "game2" / "default.xex", ec);
-    has_textures_ = fs::is_directory(app / "textures", ec) && !fs::is_empty(app / "textures", ec);
-    if (!has_disc2_) settings_.disc = 1;
     StartMusic(hub / "music");
     // (the runtime's user data: /app0/UserData/mgr)
     user_data_ = app / "UserData" / "mgr";
@@ -319,7 +295,7 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
       settings_.Save(app_);
       settings_.Apply();
       Close();
-      play_(MenuChoice{uint32_t(settings_.disc)});
+      play_(MenuChoice{1});
     }
   }
 
@@ -329,26 +305,18 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
   void Refresh() {
     installed_ = install::Check(app_);
     sources_ = install::Scan(app_);
-    std::error_code ec;
-    has_disc2_ = fs::exists(app_ / "game2" / "default.xex", ec);
-    has_textures_ = installed_.textures;
   }
 
-  // The content rows: disc 1, disc 2, Title Update 9, the DLC.
-  enum ContentRow { kRowDisc1, kRowDisc2, kRowUpdate, kRowDlc, kRowTextures, kContentRows };
+  // The content rows: the game, Title Update 4, the DLC (in install::Remove's order).
+  enum ContentRow { kRowGame, kRowUpdate, kRowDlc, kContentRows };
 
-  // What waits in install/ for a content row; nullptr: nothing. (A disc image tells which disc it
-  // is when it's read: it's offered on the first disc not installed.)
+  // What waits in install/ for a content row; nullptr: nothing.
   const install::Source* SourceFor(int row) const {
-    const int free_disc = !installed_.disc[0] ? 1 : !installed_.disc[1] ? 2 : 1;
     for (const auto& s : sources_) {
       const bool game = s.kind == install::Kind::kGameImage || s.kind == install::Kind::kGameFolder;
-      if (row <= kRowDisc2 && game && (s.disc ? s.disc : free_disc) == row + 1) return &s;
-      if (row == kRowUpdate && (s.kind == install::Kind::kUpdate || s.kind == install::Kind::kOtherUpdate) &&
-          !s.installed)
-        return &s;
+      if (row == kRowGame && game) return &s;
+      if (row == kRowUpdate && s.kind == install::Kind::kUpdate && !s.installed) return &s;
       if (row == kRowDlc && s.kind == install::Kind::kDlc && !s.installed) return &s;
-      if (row == kRowTextures && s.kind == install::Kind::kTexturePack) return &s;
     }
     return nullptr;
   }
@@ -359,18 +327,13 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
   }
   bool RowInstalled(int row) const {
     switch (row) {
-      case kRowDisc1: return installed_.disc[0];
-      case kRowDisc2: return installed_.disc[1];
-      case kRowUpdate: return installed_.update[0] && installed_.update[1];
-      case kRowDlc: return installed_.dlc > 0;
-      default: return installed_.textures;
+      case kRowGame: return installed_.game;
+      case kRowUpdate: return installed_.update;
+      default: return installed_.dlc > 0;
     }
   }
-  // The chosen disc and its title update: what PLAY needs.
-  bool Ready() const {
-    const int d = settings_.disc == 2 ? 1 : 0;
-    return installed_.disc[d] && installed_.update[d];
-  }
+  // The game and its title update: what PLAY needs.
+  bool Ready() const { return installed_.game && installed_.update; }
   // The saves page's rows after BACK UP: the saves and backups to import or restore.
   std::vector<const install::Source*> SaveSources() const {
     std::vector<const install::Source*> out;
@@ -379,8 +342,8 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     return out;
   }
 
-  // Once a frame: a finished job's outcome, and the next of what installs by itself (the discs,
-  // Title Update 9, the DLC), one at a time.
+  // Once a frame: a finished job's outcome, and the next of what installs by itself (the game,
+  // Title Update 4, the DLC), one at a time.
   void TickInstaller() {
     auto& job = install::TheJob();
     if (job.Generation() != job_generation_) {
@@ -398,10 +361,8 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
         continue;
       }
       if (!install::Automatic(s.kind) || tried_.count(s.path.string())) continue;
-      if (s.kind == install::Kind::kGameFolder && s.disc && installed_.disc[s.disc - 1]) continue;
-      if (s.kind == install::Kind::kGameImage && installed_.disc[0] && installed_.disc[1]) continue;
-      if (s.kind == install::Kind::kUpdate && RowInstalled(kRowUpdate)) continue;
-      if (s.kind == install::Kind::kTexturePack && installed_.textures) continue;
+      if ((s.kind == install::Kind::kGameFolder || s.kind == install::Kind::kGameImage) && installed_.game) continue;
+      if (s.kind == install::Kind::kUpdate && installed_.update) continue;
       tried_.insert(s.path.string());
       job.Install(app_, s);
       started = true;
@@ -522,19 +483,6 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     char music[16];
     std::snprintf(music, sizeof(music), "%d%%", settings_.music);
     std::vector<SettingLine> lines(kSettingsRows);
-    lines[kDisc] = {"GAME", "DISC", settings_.disc == 2 ? "2 - SECOND HALF" : "1 - FIRST HALF", has_disc2_,
-                    has_disc2_ ? "Which of the Xbox 360's two discs the game starts on. The game asks for disc 2 on "
-                                 "its own when the story gets there, and the app starts again on it."
-                               : "Disc 2's files aren't in the app's game2/ folder: the game runs from disc 1."};
-    lines[kFrameRate] = {"GRAPHICS", "FRAME RATE", settings_.fps == 30 ? "30 (LOCKED)" : "60", true,
-                         "30 locks the game to the Xbox 360's own rate: steady, as Metal Gear Rising: Revengeance was made. 60 lets it "
-                         "run faster, up to the TV's 60 frames a second, when the PS5 keeps up; the busiest fights "
-                         "may dip below it."};
-    lines[kTextures] = {"GRAPHICS", "HD TEXTURES", has_textures_ ? (settings_.hd_textures ? "ON" : "OFF") : "NOT INSTALLED",
-                        has_textures_,
-                        has_textures_ ? "The high resolution textures in the app's textures/ folder, in place of the "
-                                        "Xbox 360's."
-                                      : "Put a converted texture pack in the app's textures/ folder to use it here."};
     lines[kAntiAliasing] = {"GRAPHICS", "ANTI-ALIASING", settings_.fxaa ? "FXAA" : "OFF", true,
                             "FXAA smooths the jagged edges of the picture as it goes to the screen. It costs the PS5's "
                             "GPU a little and blurs fine detail slightly."};
@@ -553,15 +501,6 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
   void ChangeSetting(int row, int step, bool cross) {
     const bool flip = step || cross;
     switch (row) {
-      case kDisc:
-        if (flip && has_disc2_) settings_.disc = settings_.disc == 1 ? 2 : 1;
-        break;
-      case kFrameRate:
-        if (flip) settings_.fps = settings_.fps == 30 ? 60 : 30;
-        break;
-      case kTextures:
-        if (flip && has_textures_) settings_.hd_textures = !settings_.hd_textures;
-        break;
       case kAntiAliasing:
         if (flip) settings_.fxaa = !settings_.fxaa;
         break;
@@ -623,15 +562,13 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
   }
   std::string TextOf(const Item& it) const {
     if (it.index < 0)
-      return "Earn every other Metal Gear Rising: Revengeance trophy (" + std::to_string(trophies_.earnable) +
-             ", the multiplayer ones aside).";
+      return "Earn every other Metal Gear Rising: Revengeance trophy (" + std::to_string(trophies_.earnable) + ").";
     const auto& t = trophies_.trophies[size_t(it.index)];
     std::string text;
     if (!t.earned && t.hidden()) text = "Keep playing to find out what this one is.";
     else text = t.earned || t.locked_description.empty() ? t.description : t.locked_description;
     if (t.online())
-      text += "\n\nMultiplayer: it needs Rockstar's online service, which this port can't reach, so it doesn't "
-              "count toward the platinum.";
+      text += "\n\nOnline: it needs a service this port can't reach, so it doesn't count toward the platinum.";
     return text;
   }
 
@@ -718,7 +655,7 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     char line[96];
     std::snprintf(line, sizeof(line), "%.1f GB", double(leftover_bytes_) / (1024.0 * 1024.0 * 1024.0));
     const std::string text =
-        std::string("The disc images, title update and DLC packages it was installed from are still in "
+        std::string("The disc image, title update and DLC packages it was installed from are still in "
                     "PPSA48080/install/ (") +
         line +
         "). The game doesn't need them any more.\n\nDelete them to free the space, or keep them (they won't "
@@ -820,10 +757,12 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
       dl->AddImage(logo_.id, ImVec2(left, y), ImVec2(left + w, y + h), ImVec2(0, 0), ImVec2(1, 1), P(kWhite));
       y += h + 16 * u;
     } else {
-      dl->AddText(g_title, 120 * u, ImVec2(left, y), P(kWhite), "MAX PAYNE");
-      const float w = Width(g_title, 120 * u, "MAX PAYNE");
-      dl->AddText(g_title, 120 * u, ImVec2(left + w + 30 * u, y), P(kRed), "3");
-      y += 156 * u;
+      dl->AddText(g_title, 92 * u, ImVec2(left, y), P(kWhite), "METAL GEAR");
+      y += 104 * u;
+      dl->AddText(g_title, 92 * u, ImVec2(left, y), P(kRed), "RISING");
+      const float w = Width(g_title, 92 * u, "RISING");
+      Spaced(dl, g_item, 40 * u, ImVec2(left + w + 26 * u, y + 44 * u), P(kWhite), "REVENGEANCE", 8 * u);
+      y += 124 * u;
     }
     // the project's name, letter-spaced under the title
     Spaced(dl, g_item, 34 * u, ImVec2(left + 4 * u, y), P(kGrey), "REPLATINUM", 9 * u);
@@ -843,15 +782,12 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     } else if (!Ready()) {
       // what's missing, and where it goes
       missing_flash_ = std::max(0.0f, missing_flash_ - 0.03f);
-      const int d = settings_.disc == 2 ? 1 : 0;
       const char* what =
-          !installed_.disc[d]
-              ? (d ? "DISC 2 ISN'T INSTALLED\nPut your disc 2 image (.iso) or its files in PPSA48080/install/ and "
-                     "open the app again: it installs by itself. Or choose disc 1 on the SETTINGS page."
-                   : "THE GAME ISN'T INSTALLED\nPut your Metal Gear Rising: Revengeance disc images (.iso, any name) or the discs' "
-                     "files in PPSA48080/install/ and open the app again: they install by themselves. The "
-                     "CONTENT page shows what's there.")
-              : "TITLE UPDATE 9 ISN'T INSTALLED\nPut Title Update 9's package (tu00000001_00000000, any name) in "
+          !installed_.game
+              ? "THE GAME ISN'T INSTALLED\nPut your Metal Gear Rising: Revengeance disc image (.iso, any name) or "
+                "the disc's files in PPSA48080/install/ and open the app again: it installs by itself. The CONTENT "
+                "page shows what's there."
+              : "TITLE UPDATE 4 ISN'T INSTALLED\nPut Title Update 4's package (tu00000001_00000000, any name) in "
                 "PPSA48080/install/ and open the app again: it installs by itself.";
       const float pw = 900 * u, th = g_body->CalcTextSizeA(26 * u, FLT_MAX, pw, what).y;
       dl->AddRectFilled(ImVec2(left - 16 * u, y - 12 * u), ImVec2(left + pw + 16 * u, y + th + 12 * u),
@@ -861,8 +797,7 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
       y += th + 42 * u;
     } else {
       char where[160];
-      std::snprintf(where, sizeof(where), "Disc %d.  Title Update 9, %s and your saves load with the game.",
-                    settings_.disc == 2 ? 2 : 1,
+      std::snprintf(where, sizeof(where), "Title Update 4, %s and your saves load with the game.",
                     installed_.dlc == 1 ? "1 DLC pack" : (std::to_string(installed_.dlc) + " DLC packs").c_str());
       dl->AddText(g_body, 26 * u, ImVec2(left, y), P(kGrey), where);
       y += 54 * u;
@@ -924,21 +859,14 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     float y = 200 * u;
     const std::string dlc_name =
         installed_.dlc ? "DLC  (" + std::to_string(installed_.dlc) + (installed_.dlc == 1 ? " PACK)" : " PACKS)") : "DLC";
-    const std::string names[kContentRows] = {"DISC 1", "DISC 2", "TITLE UPDATE 9", dlc_name, "HD TEXTURES"};
+    const std::string names[kContentRows] = {"GAME", "TITLE UPDATE 4", dlc_name};
     const char* help[kContentRows] = {
-        "Metal Gear Rising: Revengeance's first disc. Put your disc images (.iso, any name) or folders of the discs' files in "
-        "PPSA48080/install/: they install into PPSA48080/game/ and game2/ when the app opens, or with X here. An "
-        "image is deleted once it's in.",
-        "The second disc: the second half of the story. The game asks for it when the story gets there, and "
-        "starts on it again from then on (the SETTINGS page's DISC).",
-        "Required: the game runs Title Update 9's code. Put its package (tu00000001_00000000, any name) in "
-        "PPSA48080/install/: it patches both discs. Other title updates can't be used.",
-        "Optional: the DLC packs (multiplayer maps, characters and weapons). Put their packages (any names) in "
-        "PPSA48080/install/: each installs by itself. TRIANGLE removes them all.",
-        "Optional: the PC version's HD textures in place of the Xbox 360's. Put the Nexus texture pack's folder (as "
-        "downloaded and extracted) in PPSA48080/install/: the app makes the HD textures from it (about 8 GB, a few "
-        "minutes) and deletes the pack's files afterwards. The PC game's own folder adds the textures the pack "
-        "doesn't have. Turn them on or off on the SETTINGS page."};
+        "Metal Gear Rising: Revengeance's disc. Put your disc image (.iso, any name) or a folder of the disc's files in "
+        "PPSA48080/install/: it installs into PPSA48080/game/ when the app opens, or with X here.",
+        "Required: the game runs Title Update 4's code. Put its package (tu00000001_00000000, any name) in "
+        "PPSA48080/install/. Other title updates can't be used.",
+        "Optional: the DLC (Jetstream, Blade Wolf, the VR missions, the costumes). Put their packages (any names) "
+        "in PPSA48080/install/: each installs by itself. TRIANGLE removes them all."};
     for (int r = 0; r < kContentRows; ++r) {
       const bool sel = r == content_row_, in = RowInstalled(r);
       const install::Source* src = SourceFor(r);
@@ -947,12 +875,11 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
       dl->AddText(g_item, fs, ImVec2(left, y), P(sel ? kWhite : kGrey), names[r].c_str());
       std::string status = in && !(r == kRowDlc && src) ? "INSTALLED"
                            : src                        ? "READY TO INSTALL"
-                           : r == kRowUpdate && (installed_.update[0] || installed_.update[1]) ? "INSTALLED (ONE DISC)"
-                                                                                               : "NOT INSTALLED";
+                                                        : "NOT INSTALLED";
       if (r == kRowDlc && src) status = std::to_string(DlcWaiting()) + " READY TO INSTALL";
       if (sel && Confirming(100 + r)) status = "PRESS TRIANGLE AGAIN TO UNINSTALL";
       dl->AddText(g_body, 28 * u, ImVec2(left + 430 * u, y + 8 * u),
-                  P(in ? kWhite : src ? kWhite : (r != kRowDlc && r != kRowDisc2 ? IM_COL32(230, 90, 70, 255) : kGrey)),
+                  P(in ? kWhite : src ? kWhite : (r != kRowDlc ? IM_COL32(230, 90, 70, 255) : kGrey)),
                   status.c_str());
       y += fs + 6 * u;
       if (src && !in) {
@@ -968,8 +895,6 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     for (const auto& s : sources_) {
       if (s.kind == install::Kind::kArchive)
         notes.push_back(Short(s.label, 40) + "  -  extract it on a PC first (7-Zip)");
-      else if (s.kind == install::Kind::kOtherUpdate)
-        notes.push_back(Short(s.label, 40) + "  -  not Title Update 9");
       else if (s.kind == install::Kind::kOther)
         notes.push_back(Short(s.label, 60));
     }
@@ -1115,7 +1040,7 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     const float want = std::clamp(sel_row * row_h - view * 0.4f, 0.0f, std::max(0.0f, rows.size() * row_h - view));
     scroll_ += (want - scroll_) * std::min(1.0f, dt * 12.0f);
     const float x = 140 * u + page_dx_, right = 940 * u + page_dx_;
-    static const char* const kGroupNames[] = {"EARNED", "NOT EARNED YET", "MULTIPLAYER  -  ONLINE ONLY"};
+    static const char* const kGroupNames[] = {"EARNED", "NOT EARNED YET", "ONLINE ONLY"};
     dl->PushClipRect(ImVec2(0, top), ImVec2(size.x, bottom), true);
     for (size_t r = 0; r < rows.size(); ++r) {
       const float ry = top + r * row_h - scroll_;
@@ -1219,25 +1144,22 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     entry("CRACKDOWN RECOMPILED  -  SAULOB",
           "Whose ReXGlue patches and frame rate work this port's GPU and timing fixes come from. "
           "github.com/saulob/crackdown-xbox360-recompiled");
-    entry("CRACKDOWN: REACTIVATED",
-          "The sister port whose menu pages, installer, trophy list and pop-up this one shares.");
-    entry("HD TEXTURES  -  MDSXXX1",
-          "Metal Gear Rising: Revengeance Texture Pack V4 (nexusmods.com/maxpayne3/mods/275, with ElPicoleto's blood effects), which "
-          "the HD textures are made from on the PS5.");
+    entry("CRACKDOWN: REACTIVATED  /  MAX PAYNE 3 REPRESCRIBED",
+          "The sister ports this one grew out of: the same menu, installer, saves and trophies.");
 
     const float px = 1060 * u + page_dx_, pw = size.x - 140 * u - px;
     float py = 180 * u;
     // the shout-out, on a panel of its own
     {
       const char* thanks =
-          "For Max Payne: Remedy's noir that started it all, and Rockstar's third chapter - Sao Paulo, the bullet "
-          "time, the cutscenes that never cut away. Still the best shootdodge there is.";
+          "For Raiden's best day: Blade Mode, the parries, Jetstream Sam, and a soundtrack that sings along to "
+          "every boss. Rules of nature.";
       const float th = g_body->CalcTextSizeA(26 * u, FLT_MAX, pw - 48 * u, thanks).y;
       dl->AddRectFilled(ImVec2(px - 24 * u, py - 16 * u), ImVec2(px + pw, py + 96 * u + th),
                         P(IM_COL32(8, 8, 8, 170)), 6 * u);
       dl->AddRectFilled(ImVec2(px - 24 * u, py - 16 * u), ImVec2(px - 18 * u, py + 96 * u + th), P(kRed));
       dl->AddText(g_body, 20 * u, ImVec2(px, py), P(kRed), "SPECIAL THANKS");
-      dl->AddText(g_item, 40 * u, ImVec2(px, py + 30 * u), P(kWhite), "ROCKSTAR GAMES  &  REMEDY");
+      dl->AddText(g_item, 40 * u, ImVec2(px, py + 30 * u), P(kWhite), "PLATINUMGAMES  &  KOJIMA PRODUCTIONS");
       dl->AddText(g_body, 26 * u, ImVec2(px, py + 84 * u), P(kGrey), thanks, nullptr, pw - 48 * u);
       py += 96 * u + th + 46 * u;
     }
@@ -1249,9 +1171,9 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     dl->AddText(g_body, 20 * u, ImVec2(px, py), P(kRed), "PLEASE NOTE");
     py += 36 * u;
     const char* note =
-        "An unofficial fan project, not affiliated with or endorsed by Rockstar Games, Take-Two Interactive, Remedy "
-        "Entertainment or Sony. Max Payne and all related names belong to their owners. No game files are included: "
-        "you need your own copy of Metal Gear Rising: Revengeance for the Xbox 360.";
+        "An unofficial fan project, not affiliated with or endorsed by Konami, PlatinumGames, Microsoft or Sony. "
+        "Metal Gear and all related names belong to their owners. No game files are included: you need your own "
+        "copy of Metal Gear Rising: Revengeance for the Xbox 360.";
     dl->AddText(g_body, 24 * u, ImVec2(px, py), P(kGrey), note, nullptr, pw);
     py += g_body->CalcTextSizeA(24 * u, FLT_MAX, pw, note).y + 36 * u;
     dl->AddText(g_body, 20 * u, ImVec2(px, py), P(kRed), "BUILT WITH");
@@ -1305,7 +1227,6 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
   Image background_, logo_;
   gta4ps5::sound::Voice* music_ = nullptr;
   std::string song_;
-  bool has_disc2_ = false, has_textures_ = false;
   install::Installed installed_;
   std::vector<install::Source> sources_;
   std::set<std::string> tried_;  // (installed by themselves once a session)
@@ -1315,7 +1236,7 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
   bool ask_leftovers_ = false;
   uint64_t leftover_bytes_ = 0;
   Page page_ = kHome;
-  int row_ = kFrameRate, trophy_ = 0;
+  int row_ = kAntiAliasing, trophy_ = 0;
   trophies::List trophies_;
   std::vector<Item> items_;
   std::map<uint32_t, Image> pictures_;

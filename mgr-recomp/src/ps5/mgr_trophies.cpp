@@ -88,12 +88,8 @@ const char* GradeName(Grade grade) {
 }
 
 bool Online(uint32_t id) {
-  // Full Monty, Payne Bringer, Max Payne Invitational, Man Of Many Weapons, Man Of Many Faces,
-  // Deathmatch Challenge, Grave Robber, The Gambler, Sweep, Training Complete, Dearest Of All My Friends
-  switch (id) {
-    case 77: case 78: case 79: case 81: case 82: case 83: case 84: case 85: case 86: case 87: case 89:
-      return true;
-  }
+  // (Metal Gear Rising: Revengeance has no online achievements: every one counts)
+  (void)id;
   return false;
 }
 

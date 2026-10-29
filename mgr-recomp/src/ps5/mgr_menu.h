@@ -1,6 +1,6 @@
 // Metal Gear Rising: Revengeance RePlatinum (PS5) - the menu the app opens on (mgr_menu.cpp),
 // laid out as Crackdown PS5's and GTA IV PS5's hub: its pages HOME (PLAY),
-// SETTINGS (the disc, the frame rate, the HD textures, the menu music's
+// SETTINGS (anti-aliasing, texture filtering, the GPU helper, the menu music's
 // level), TROPHIES (the achievements, earned and not: mgr_trophies.h) and
 // CREDITS, over hub/background.jpg with the menu song (hub/music/) playing.
 #pragma once

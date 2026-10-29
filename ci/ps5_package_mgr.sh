@@ -111,19 +111,16 @@ cat > "$app/sce_sys/param.json" <<EOF
 EOF
 python3 "$here/make_sce_art.py" "$app/sce_sys"
 cp "$here/../package/README.txt" "$app/README.txt"
-# (the menu installs the discs into game/ and game2/ from install/)
+# (the menu installs the disc into game/ from install/)
 mkdir -p "$app/install"
 cp "$here/../package/install-README.txt" "$app/install/README.txt"
-# the HD textures' list, for making them on the console from the Nexus pack (tools/mgr_texture_manifest.py)
 mkdir -p "$app/hub"
-cp "$here/../package/mgr-textures.txt" "$app/hub/mgr-textures.txt"
 # The installer payload (ps5/payload/installer, Crackdown PS5's and GTA IV for PS5's): the app sends
 # it to the payload loader so the install is written at the drive's full speed (mgr_install.cpp).
 echo "==> [package] the installer payload"
 payload_src=$here/../ps5/payload/installer
 payload_build=$build/installer-payload
 rm -rf "$payload_build" && mkdir -p "$payload_build" && cp -r "$payload_src/." "$payload_build/"
-cp "$here/../mgr-recomp/src/ps5/mgr_textures_core.h" "$payload_build/include/"  # (the app's, shared)
 make -C "$payload_build" PS5_PAYLOAD_SDK="$sdk_root"
 mkdir -p "$app/payloads"
 cp "$payload_build/mgr-ps5-installer.elf" "$app/payloads/mgr-ps5-installer.elf"

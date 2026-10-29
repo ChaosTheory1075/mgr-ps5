@@ -11,16 +11,13 @@ ELF ?= mgr-ps5-installer.elf
 
 SRC := installer.cpp store_disc.cpp store_stfs.cpp
 HDR := store_disc.hpp store_stfs.hpp store_zip.hpp include/rex/platform.h include/gta4_install_io.h \
-       include/xxhash.h include/mgr_textures_core.h \
        include/rex/filesystem/direct_io.h
-# zlib: the toolchain's (next to the SDK), for the HD textures
-ZLIB ?= $(PS5_PAYLOAD_SDK)/../zlib/root/usr
-CXXFLAGS := -std=c++20 -O2 -Wall -Werror -Iinclude -I$(ZLIB)/include
+CXXFLAGS := -std=c++20 -O2 -Wall -Werror -Iinclude
 
 all: $(ELF)
 
 $(ELF): $(SRC) $(HDR)
-	$(CXX) $(CXXFLAGS) -o $@ $(SRC) $(ZLIB)/lib/libz.a -lpthread
+	$(CXX) $(CXXFLAGS) -o $@ $(SRC) -lpthread
 	$(PS5_PAYLOAD_SDK)/bin/llvm-strip --strip-debug $@ 2>/dev/null || true
 
 clean:

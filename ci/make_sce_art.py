@@ -6,10 +6,10 @@ pic0.dds / pic1.dds (3840x2160 BC7, as the PS5 takes them).
                     [--title-font <ttf>]
 
 With --icon / --background (the user's own art, kept out of git:
-MaxPayne3Logo.jpg and MaxPayne3Background.jpg) those pictures are used:
+Extras/app-assets) those pictures are used:
 the icon squared to 512x512, the background cut to 16:9 and scaled to 4K,
 encoded as BC7 mode 6 (two endpoints and 16 levels per 4x4 block; needs
-numpy). "RePlatinum" goes under each one's MAX PAYNE in red, in
+numpy). "RePlatinum" goes under each one's title in red, in
 --title-font (Impact is closest to the game's lettering; narrowed to its
 width): on the background under the red title (found by its colour), on
 the icon under the cover's white title. Without them a title card is drawn with Pillow and stored with one

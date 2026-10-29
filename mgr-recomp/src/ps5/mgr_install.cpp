@@ -1,5 +1,5 @@
 // Metal Gear Rising: Revengeance RePlatinum (PS5) - see mgr_install.h. Crackdown PS5's
-// cd_install.cpp, for two discs, Title Update 9 and any number of DLC packs.
+// cd_install.cpp (by way of Max Payne 3 RePrescribed's), for the disc, Title Update 4 and any number of DLC packs.
 #include "mgr_install.h"
 #if REX_PLATFORM_PS5
 
@@ -60,10 +60,12 @@ namespace {
 constexpr uint32_t kTitleId = 0x4B4E080A;
 constexpr const char* kTitleFolder = "4B4E080A";
 constexpr uint32_t kTypeSave = 0x00000001, kTypeDlc = 0x00000002, kTypeUpdate = 0x000B0000;
-// Title Update 9's default.xexp (both discs' are this size)
-constexpr uint64_t kUpdate9XexpSize = 3121152;
+// The title update's default.xexp (Title Update 4, the last one: "v4")
+constexpr uint64_t kUpdateXexpSize = 3258368;
 constexpr const char* kBackupMarker = "mgr-backup.txt";
-const char* const kDiscFolders[2] = {"game", "game2"};
+constexpr const char* kGameFolder = "game";
+// The save name an import falls back on (a package renamed on a PC): the game's own, once seen.
+constexpr const char* kDefaultSaveName = "MGR_SAVE";
 
 std::string Lower(std::string s) {
   for (char& c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
@@ -81,14 +83,28 @@ fs::path FindChild(const fs::path& dir, const std::string& name) {
   return {};
 }
 
-// A disc's folder: which disc it is (common/disc1.txt or disc2.txt), 0 not Metal Gear Rising: Revengeance's.
-int DiscOfFolder(const fs::path& dir) {
-  if (FindChild(dir, "default.xex").empty()) return 0;
-  const fs::path common = FindChild(dir, "common");
-  if (common.empty()) return 0;
-  if (!FindChild(common, "disc2.txt").empty()) return 2;
-  if (!FindChild(common, "disc1.txt").empty()) return 1;
+// An executable's title id: its execution info header (key 0x00040006), 0 when unreadable.
+uint32_t XexTitleId(const fs::path& xex) {
+  std::ifstream in(xex, std::ios::binary);
+  unsigned char head[0x18] = {};
+  if (!in.read(reinterpret_cast<char*>(head), sizeof(head)) || std::memcmp(head, "XEX2", 4)) return 0;
+  auto be = [](const unsigned char* p) { return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3]; };
+  const uint32_t count = std::min<uint32_t>(be(head + 0x14), 64);
+  for (uint32_t i = 0; i < count; ++i) {
+    unsigned char entry[8];
+    if (!in.seekg(0x18 + i * 8) || !in.read(reinterpret_cast<char*>(entry), 8)) return 0;
+    if (be(entry) != 0x00040006) continue;
+    unsigned char info[16];
+    if (!in.seekg(be(entry + 4)) || !in.read(reinterpret_cast<char*>(info), sizeof(info))) return 0;
+    return be(info + 12);
+  }
   return 0;
+}
+
+// A folder of the game's disc: default.xex, Metal Gear Rising: Revengeance's.
+bool IsGameFolder(const fs::path& dir) {
+  const fs::path xex = FindChild(dir, "default.xex");
+  return !xex.empty() && XexTitleId(xex) == kTitleId;
 }
 
 bool IsPackage(const fs::path& file) {
@@ -590,18 +606,14 @@ fs::path Folder(const fs::path& app) {
 Installed Check(const fs::path& app) {
   Installed in;
   std::error_code ec;
-  for (int d = 0; d < 2; ++d) {
-    const fs::path game = app / kDiscFolders[d];
-    in.disc[d] = !FindChild(game, "default.xex").empty();
-    const fs::path xexp = FindChild(game, "default.xexp");
-    in.update[d] = !xexp.empty() && fs::file_size(xexp, ec) == kUpdate9XexpSize;
-  }
+  const fs::path game = app / kGameFolder;
+  in.game = !FindChild(game, "default.xex").empty();
+  const fs::path xexp = FindChild(game, "default.xexp");
+  in.update = !xexp.empty() && fs::file_size(xexp, ec) == kUpdateXexpSize;
   for (fs::directory_iterator it(app / "dlc", ec), end; !ec && it != end; it.increment(ec)) {
     std::error_code ec2;
     if (it->is_directory(ec2) && it->path().extension() != ".installing" && !fs::is_empty(it->path(), ec2)) ++in.dlc;
   }
-  ec.clear();
-  in.textures = fs::is_directory(app / "textures", ec) && !fs::is_empty(app / "textures", ec);
   ec.clear();
   for (fs::directory_iterator x(app / "saves", ec), end; !ec && x != end; x.increment(ec)) {
     std::error_code ec2;
@@ -629,8 +641,7 @@ Installed Check(const fs::path& app) {
 }
 
 bool Automatic(Kind kind) {
-  return kind == Kind::kGameImage || kind == Kind::kGameFolder || kind == Kind::kUpdate || kind == Kind::kDlc ||
-         kind == Kind::kTexturePack;
+  return kind == Kind::kGameImage || kind == Kind::kGameFolder || kind == Kind::kUpdate || kind == Kind::kDlc;
 }
 
 namespace {
@@ -665,17 +676,11 @@ std::vector<Source> Scan(const fs::path& app) {
       out.push_back({Kind::kBackup, it->path(), it->path().filename().string()});
   }
   ec.clear();
-  if (TexturePackFound(app)) out.push_back({Kind::kTexturePack, root, "HD texture pack"});
   for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end;
        !ec && it != end; it.increment(ec)) {
     const fs::path p = it->path();
     std::error_code ec2;
     if (it->is_directory(ec2)) {
-      // (a texture pack's or PC game's folder: its archives are the texture job's)
-      if (!FindChild(p, "pc.rpf").empty() || !FindChild(p, "maxpayne3.exe").empty()) {
-        it.disable_recursion_pending();
-        continue;
-      }
       if (p == backups) {
         it.disable_recursion_pending();
         continue;
@@ -688,8 +693,7 @@ std::vector<Source> Scan(const fs::path& app) {
       }
       if (!FindChild(p, "default.xex").empty()) {
         Source s{Kind::kGameFolder, p, p.filename().string() + "/"};
-        s.disc = DiscOfFolder(p);
-        if (!s.disc) s.kind = Kind::kOther, s.label += "  (not a Metal Gear Rising: Revengeance disc)";
+        if (!IsGameFolder(p)) s.kind = Kind::kOther, s.label += "  (not Metal Gear Rising: Revengeance's disc)";
         out.push_back(s);
         it.disable_recursion_pending();
       } else if (it.depth() >= 4) {
@@ -712,11 +716,9 @@ std::vector<Source> Scan(const fs::path& app) {
       }
       const std::string name = Narrow(h.name);
       if (h.type == kTypeUpdate) {
-        // ("Metal Gear Rising: Revengeance Title Update 9"?) the install checks the patch itself
-        const bool other = name.find('#') != std::string::npos && name.find("#9") == std::string::npos;
-        Source s{other ? Kind::kOtherUpdate : Kind::kUpdate, p, name.empty() ? file : name};
-        const Installed in = Check(app);
-        s.installed = !other && in.update[0] && in.update[1];
+        // (the install checks the patch itself: Title Update 4's default.xexp)
+        Source s{Kind::kUpdate, p, name.empty() ? file : name};
+        s.installed = Check(app).update;
         out.push_back(s);
       } else if (h.type == kTypeDlc) {
         Source s{Kind::kDlc, p, name.empty() ? file : name};
@@ -839,18 +841,17 @@ bool Job::Install(const fs::path& app, const Source& source) {
           const fs::path system_update = FindChild(tmp, "$SystemUpdate");
           if (!system_update.empty()) fs::remove_all(system_update, ec);
         }
-        const int disc = DiscOfFolder(tmp);
-        if (!disc) {
-          // (a folder that wasn't a disc goes back where it was)
+        if (!IsGameFolder(tmp)) {
+          // (a folder that wasn't the disc goes back where it was)
           if (source.kind == Kind::kGameFolder) {
             fs::rename(tmp, source.path, ec);
           } else {
             fs::remove_all(tmp, ec);
           }
-          result = source.label + " isn't a Metal Gear Rising: Revengeance disc (no default.xex and common/disc1.txt or disc2.txt).";
+          result = source.label + " isn't Metal Gear Rising: Revengeance's disc (its default.xex is another game's).";
           return false;
         }
-        const fs::path game = app / kDiscFolders[disc - 1];
+        const fs::path game = app / kGameFolder;
         // an installed title update stays
         for (const char* keep : {"default.xexp", "update"}) {
           const fs::path was = FindChild(game, keep);
@@ -859,15 +860,14 @@ bool Job::Install(const fs::path& app, const Source& source) {
         fs::remove_all(game, ec);
         fs::rename(tmp, game, ec);
         if (ec) {
-          result = "Couldn't put disc " + std::to_string(disc) + " in place (" + ec.message() + ").";
+          result = "Couldn't put the game in place (" + ec.message() + ").";
           return false;
         }
         if (source.kind == Kind::kGameImage) Leftover(source.path);
-        result = "Disc " + std::to_string(disc) + " is installed.";
+        result = "The game is installed.";
         return true;
       });
     case Kind::kUpdate:
-    case Kind::kOtherUpdate:
       return Start("Installing " + source.label, [this, app, source](std::string& result) {
         std::error_code ec;
         const fs::path tmp = app / "update.installing";
@@ -887,35 +887,28 @@ bool Job::Install(const fs::path& app, const Source& source) {
           result = "Installing " + source.label + " failed: " + error;
           return false;
         }
-        // disc001/ and disc002/: each disc's patch and its other files
-        for (int d = 0; d < 2; ++d) {
-          const fs::path part = FindChild(tmp, d ? "disc002" : "disc001");
-          const fs::path xexp = part.empty() ? fs::path() : FindChild(part, "default.xexp");
-          if (xexp.empty() || fs::file_size(xexp, ec) != kUpdate9XexpSize) {
-            fs::remove_all(tmp, ec);
-            result = source.label + " isn't Title Update 9, which Metal Gear Rising: Revengeance RePlatinum needs.";
-            return false;
-          }
+        // default.xexp (the patch) beside default.xex, the rest (patch_data/) as the game's update/
+        const fs::path xexp = FindChild(tmp, "default.xexp");
+        if (xexp.empty() || fs::file_size(xexp, ec) != kUpdateXexpSize) {
+          fs::remove_all(tmp, ec);
+          result = source.label + " isn't Title Update 4, which Metal Gear Rising: Revengeance RePlatinum needs.";
+          return false;
         }
-        for (int d = 0; d < 2; ++d) {
-          const fs::path part = FindChild(tmp, d ? "disc002" : "disc001");
-          const fs::path game = app / kDiscFolders[d], xexp = FindChild(part, "default.xexp");
-          fs::create_directories(game, ec);
-          const fs::path old_xexp = FindChild(game, "default.xexp");
-          if (!old_xexp.empty()) fs::remove(old_xexp, ec);
-          fs::rename(xexp, game / "default.xexp", ec);
-          const fs::path old_update = FindChild(game, "update");
-          if (!old_update.empty()) fs::remove_all(old_update, ec);
-          fs::rename(part, game / "update", ec);
-          if (ec) {
-            fs::remove_all(tmp, ec);
-            result = "Couldn't put Title Update 9 in place (" + ec.message() + ").";
-            return false;
-          }
+        const fs::path game = app / kGameFolder;
+        fs::create_directories(game, ec);
+        const fs::path old_xexp = FindChild(game, "default.xexp");
+        if (!old_xexp.empty()) fs::remove(old_xexp, ec);
+        fs::rename(xexp, game / "default.xexp", ec);
+        const fs::path old_update = FindChild(game, "update");
+        if (!old_update.empty()) fs::remove_all(old_update, ec);
+        fs::rename(tmp, game / "update", ec);
+        if (ec) {
+          fs::remove_all(tmp, ec);
+          result = "Couldn't put the title update in place (" + ec.message() + ").";
+          return false;
         }
-        fs::remove_all(tmp, ec);
         Leftover(source.path);
-        result = "Title Update 9 is installed (both discs).";
+        result = "Title Update 4 is installed.";
         return true;
       });
     case Kind::kDlc:
@@ -955,10 +948,6 @@ bool Job::Install(const fs::path& app, const Source& source) {
         result = source.label + " is installed.";
         return true;
       });
-    case Kind::kTexturePack:
-      return Start("Making the HD textures", [this, app](std::string& result) {
-        return BuildTextures(app, done_, total_, result);
-      });
     case Kind::kSave:
       return Start("Importing the save " + source.label, [this, app, source](std::string& result) {
         std::error_code ec;
@@ -966,29 +955,14 @@ bool Job::Install(const fs::path& app, const Source& source) {
         // runtime makes its profile (a random XUID, its saves' folder) on its first start, so an
         // import into whatever folder is there now can miss it (Crackdown PS5 found).
         const fs::path profile = app / "saves" / "_import";
-        // The game's save files are MP3_PROGRESSION, MP3_LOADOUT, MP3_PLAYERCUSTOM and MP3_STATS,
-        // and it opens no other names: the package's own name when it's one of them (as copied off
-        // the 360's drive), else told from its title, else the story's progress.
+        // The save's name on the 360 is its package's file name (as copied off the 360's drive), which
+        // the game opens it by. A copy renamed on a PC (with an extension, a " (1)"...) loses it:
+        // its file name up to the first dot or space, the game's usual name without one.
         Header h;
         ReadHeader(source.path, h);
-        const std::string file_upper = [&] {
-          std::string n = source.path.filename().string();
-          for (char& ch : n) ch = char(std::toupper(static_cast<unsigned char>(ch)));
-          return n;
-        }();
-        const std::string title_lower = Lower(Narrow(h.name));
-        std::string name = "MP3_PROGRESSION";
-        for (const char* known : {"MP3_PROGRESSION", "MP3_LOADOUT", "MP3_PLAYERCUSTOM", "MP3_STATS"}) {
-          if (file_upper.find(known) != std::string::npos) {
-            name = known;
-            break;
-          }
-        }
-        if (file_upper.find("MGR_") == std::string::npos) {
-          if (title_lower.find("loadout") != std::string::npos) name = "MP3_LOADOUT";
-          else if (title_lower.find("custom") != std::string::npos) name = "MP3_PLAYERCUSTOM";
-          else if (title_lower.find("stat") != std::string::npos) name = "MP3_STATS";
-        }
+        std::string name = source.path.filename().string();
+        name = name.substr(0, name.find_first_of(". ("));
+        if (name.empty()) name = kDefaultSaveName;
         const fs::path title = profile / kTitleFolder;
         const fs::path dest = title / "00000001" / name, tmp = dest.string() + ".installing";
         fs::remove_all(tmp, ec);
@@ -1047,18 +1021,15 @@ bool Job::Install(const fs::path& app, const Source& source) {
 }
 
 bool Job::Uninstall(const fs::path& app, Remove what) {
-  const char* name = what == Remove::kDisc1    ? "disc 1"
-                     : what == Remove::kDisc2  ? "disc 2"
-                     : what == Remove::kUpdate ? "Title Update 9"
-                     : what == Remove::kDlc    ? "the DLC"
-                                               : "the HD textures";
+  const char* name = what == Remove::kGame     ? "the game"
+                     : what == Remove::kUpdate ? "Title Update 4"
+                                               : "the DLC";
   return Start(std::string("Removing ") + name, [app, what, name](std::string& result) {
     std::error_code ec;
+    const fs::path game = app / kGameFolder;
     switch (what) {
-      case Remove::kDisc1:
-      case Remove::kDisc2: {
-        // (its title update stays, for the disc's next install)
-        const fs::path game = app / kDiscFolders[what == Remove::kDisc1 ? 0 : 1];
+      case Remove::kGame:
+        // (its title update stays, for the game's next install)
         for (fs::directory_iterator it(game, ec), end; !ec && it != end; it.increment(ec)) {
           const std::string n = Lower(it->path().filename().string());
           if (n == "default.xexp" || n == "update") continue;
@@ -1066,21 +1037,15 @@ bool Job::Uninstall(const fs::path& app, Remove what) {
           fs::remove_all(it->path(), ec2);
         }
         break;
-      }
-      case Remove::kUpdate:
-        for (const char* folder : kDiscFolders) {
-          const fs::path game = app / folder;
-          const fs::path xexp = FindChild(game, "default.xexp"), update = FindChild(game, "update");
-          if (!xexp.empty()) fs::remove(xexp, ec);
-          if (!update.empty()) fs::remove_all(update, ec);
-        }
+      case Remove::kUpdate: {
+        const fs::path xexp = FindChild(game, "default.xexp"), update = FindChild(game, "update");
+        if (!xexp.empty()) fs::remove(xexp, ec);
+        if (!update.empty()) fs::remove_all(update, ec);
         break;
+      }
       case Remove::kDlc:
         fs::remove_all(app / "dlc", ec);
         fs::create_directories(app / "dlc", ec);
-        break;
-      default:
-        fs::remove_all(app / "textures", ec);
         break;
     }
     result = std::string("Removed ") + name + ".";

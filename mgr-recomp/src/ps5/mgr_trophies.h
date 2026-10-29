@@ -2,9 +2,8 @@
 // gta4-ps5's hub_trophies.h, as Crackdown PS5 ports it): the menu's Trophies
 // page (mgr_menu.cpp) and the popup in the game (mgr_trophies_game.cpp).
 //
-// The achievements are Metal Gear Rising: Revengeance's 46 (in its default.xex's XDBF: ids 6 to
-// 89). The 11 multiplayer ones need Rockstar's online service, which is gone:
-// they're listed apart and don't count toward the platinum; the other 35 do.
+// The achievements are Metal Gear Rising: Revengeance's (in its default.xex's
+// XDBF), all of them single player: every one counts toward the platinum.
 // The game unlocks them as on the Xbox 360
 // and the runtime keeps them in user_data/achievements/4B4E080A.toml. When
 // the game starts, the port also writes their list and pictures there
@@ -30,9 +29,9 @@ enum class Grade { kBronze, kSilver, kGold, kPlatinum };
 
 Grade GradeFor(uint32_t gamerscore);
 const char* GradeName(Grade grade);  // "Bronze"...
-// The achievements that count toward the platinum (all but the multiplayer ones).
+// The achievements that count toward the platinum (all but any online ones).
 bool Here(uint32_t id);
-// A multiplayer one (Rockstar's online service: not earnable here).
+// An online one (a service this port can't reach: not earnable here). None in this game.
 bool Online(uint32_t id);
 
 struct Trophy {

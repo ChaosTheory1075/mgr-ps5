@@ -60,8 +60,8 @@ def main():
          "if(REXGLUE_USE_VULKAN)\n    if(REXGLUE_BUILD_TESTS)\n",
          "if(REXGLUE_USE_VULKAN AND NOT MGR_NO_GTA4_NATIVE)\n    if(REXGLUE_BUILD_TESTS)\n")
 
-    # XamSwapDisc reaches the app (mgr_app.cpp: disc 2 by starting again on
-    # its files); without one, the stub as before.
+    # XamSwapDisc reaches an app that defines rex_app_swap_disc (Max Payne 3's
+    # disc 2); without one (this game has one disc), the stub as before.
     xam_info = sdk / "src" / "kernel" / "xam" / "xam_info.cpp"
     edit(xam_info,
          "u32 XamSwapDisc_entry(u32 disc_number) {\n",

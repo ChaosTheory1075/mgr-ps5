@@ -8,10 +8,9 @@
 #   a fresh copy and syncs it into $W/ws/fw by content, so ninja and ccache only
 #   rebuild what changed.
 # - Codegen runs again only when its inputs change (cached in $W/gen/<hash>).
-# - The game's code comes from your own files: MGR_XEX=<disc 1's default.xex> and
-#   MGR_XEXP=<Title Update 9's disc001/default.xexp> (checked by their SHA-1s), or
-#   else the private repo's assets/game.tar.enc with MGR_ASSET_KEY. Nothing leaves
-#   the PC.
+# - The game's code comes from your own files: MGR_XEX=<the disc's default.xex> and
+#   MGR_XEXP=<Title Update 4's default.xexp> (checked by their SHA-1s; on this PC,
+#   Extras/game/ and Extras/TU4/ beside the repo by default). Nothing leaves the PC.
 set -eo pipefail
 
 repo=$(realpath "${1:-$(dirname "$0")/../..}")
@@ -21,25 +20,17 @@ TITLE_ID=${TITLE_ID:-PPSA48080}
 GTA4_PS5_REPO=https://github.com/elripalda/gta4-ps5
 CD_PC_REPO=https://github.com/saulob/crackdown-xbox360-recompiled
 CD_PC_COMMIT=33ab1b632e38cb5c1c39a3d56c479537b9e0d185
-# disc 1's default.xex (0.0.0.6) and Title Update 9's disc001/default.xexp
-XEX_SHA1=d36c6b8e6afc796b4c82f831aff6bf41ba494e6a
-XEXP_SHA1=b446247658a7e7070eb7519e790beb61cb68878c
-if [ -n "$MGR_XEX" ]; then
-  echo "$XEX_SHA1  $MGR_XEX" | sha1sum -c --quiet || { echo "$MGR_XEX isn't disc 1's default.xex" >&2; exit 2; }
-  echo "$XEXP_SHA1  $MGR_XEXP" | sha1sum -c --quiet || {
-    echo "$MGR_XEXP isn't Title Update 9's disc001/default.xexp" >&2
-    exit 2
-  }
-elif [ ! -f "$repo/assets/game.tar.enc" ]; then
-  echo "set MGR_XEX and MGR_XEXP to your own game files" >&2
-  exit 2
-elif [ -z "$MGR_ASSET_KEY" ]; then
-  key_file="$repo/../Extras/mgr-asset-key.txt"
-  [ -f "$key_file" ] || key_file="$repo/../mgr-asset-key.txt"
-  [ -f "$key_file" ] || { echo "set MGR_XEX and MGR_XEXP to your own game files" >&2; exit 2; }
-  MGR_ASSET_KEY=$(tr -d '\r\n' < "$key_file")
+# the disc's default.xex and Title Update 4's default.xexp
+XEX_SHA1=TBD
+XEXP_SHA1=4320595b58c28eb801e457361a4659ea1e1b2586
+MGR_XEX=${MGR_XEX:-$repo/../Extras/game/default.xex}
+MGR_XEXP=${MGR_XEXP:-$repo/../Extras/TU4/default.xexp}
+[ -f "$MGR_XEX" ] && [ -f "$MGR_XEXP" ] || { echo "set MGR_XEX and MGR_XEXP to your own game files" >&2; exit 2; }
+if [ "$XEX_SHA1" != TBD ]; then
+  echo "$XEX_SHA1  $MGR_XEX" | sha1sum -c --quiet || { echo "$MGR_XEX isn't the disc's default.xex" >&2; exit 2; }
 fi
-export MGR_ASSET_KEY
+echo "$XEXP_SHA1  $MGR_XEXP" | sha1sum -c --quiet || { echo "$MGR_XEXP isn't Title Update 4's default.xexp" >&2; exit 2; }
+[ "$XEX_SHA1" != TBD ] || XEX_SHA1=$(sha1sum "$MGR_XEX" | cut -c1-40)
 export CCACHE_DIR=$W/ccache
 step() { echo "==> $(date +%T) $*"; }
 
@@ -98,11 +89,7 @@ if [ ! -d "$W/gen/$gen_key/generated" ]; then
   step "codegen"
   H=$W/fw-host/$M
   rm -rf "$H/generated" "$H/assets" && mkdir -p "$H/assets" "$W/private"
-  if [ -n "$MGR_XEX" ]; then
-    cp "$MGR_XEX" "$H/assets/default.xex" && cp "$MGR_XEXP" "$H/assets/default.xexp"
-  else
-    openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:MGR_ASSET_KEY -in assets/game.tar.enc | tar -xf - -C "$H/assets"
-  fi
+  cp "$MGR_XEX" "$H/assets/default.xex" && cp "$MGR_XEXP" "$H/assets/default.xexp"
   REX_DUMP_IMAGE=$W/private/image.bin "$REXGLUE" --log-level info -f codegen "$H/mgr_manifest.toml" > "$W/codegen.txt" 2>&1 ||
     { tail -80 "$W/codegen.txt"; exit 1; }
   RBW=$W/fw-host/glue/rexglue-sdk-main/gta4-recomp/tools/read_before_write.py
@@ -160,8 +147,8 @@ if [ -d "$assets" ]; then
 fi
 ls -l "$app/eboot.bin"
 if [ -n "$app_out" ]; then
-  # the app's own files over the folder (a new one, or an installed one: its game, DLC, textures,
-  # saves, UserData and menu.ini are left as they are)
+  # the app's own files over the folder (a new one, or an installed one: its game, DLC, saves,
+  # UserData and menu.ini are left as they are)
   mkdir -p "$app_out"
   cp -r "$app/." "$app_out/"
   cp out/symbols.txt.gz "$repo/../Extras/ps5-build-logs/symbols.txt.gz" 2>/dev/null || true

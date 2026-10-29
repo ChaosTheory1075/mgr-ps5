@@ -1,15 +1,14 @@
 // Metal Gear Rising: Revengeance RePlatinum (PS5) - the installer the menu's CONTENT and SAVES
-// pages run (Crackdown PS5's cd_install, for Metal Gear Rising: Revengeance's two discs): what's
+// pages run (Crackdown PS5's cd_install, by way of Max Payne 3 RePrescribed's): what's
 // in the app's install folder (<app>/install), what's installed, and the jobs
 // that install, uninstall, import and back up, on a thread of their own.
 //
-//  - The discs: a disc image (.iso, any name) or a folder of a disc's files
-//    (anywhere in install/), disc 1 into <app>/game, disc 2 into <app>/game2
-//    (told apart by the disc's common/disc1.txt or disc2.txt).
-//  - Title Update 9 (its package, any name): each disc's patch (disc001/,
-//    disc002/) as default.xexp into that disc's folder, its other files into
-//    <disc>/update/. Other title updates are named but not installed: the
-//    program is TU9's.
+//  - The disc: a disc image (.iso, any name) or a folder of its files
+//    (anywhere in install/), into <app>/game (told by its default.xex's title
+//    id).
+//  - Title Update 4 (its package, any name): its default.xexp into game/, its
+//    other files (patch_data/) into game/update/. Other title updates aren't
+//    installed: the program is TU4's.
 //  - The DLC packages (any number): each into <app>/dlc/<its content id>/,
 //    the name the Xbox 360 gives it, whatever the file is called.
 //  - Saves: Xbox 360 save packages, into <app>/saves the way the runtime keeps
@@ -39,10 +38,8 @@ namespace fs = std::filesystem;
 enum class Kind {
   kGameImage,    // a disc image
   kGameFolder,   // a folder with default.xex
-  kUpdate,       // Title Update 9
-  kOtherUpdate,  // another title update: not installable
+  kUpdate,       // a title update (Title Update 4's is checked when it's installed)
   kDlc,
-  kTexturePack,  // the Nexus HD texture pack's (or the PC game's) archives: HD textures made from them
   kSave,         // an Xbox 360 save package
   kBackup,       // one of this app's backups
   kArchive,      // .7z / .rar / .zip: extract on a PC
@@ -53,7 +50,6 @@ struct Source {
   Kind kind = Kind::kOther;
   fs::path path;
   std::string label;  // for the menu
-  int disc = 0;       // (kGameImage / kGameFolder) 1 or 2, 0 not known yet (an image: read when installed)
   bool installed = false;  // (kUpdate / kDlc) already installed from it: only to delete or keep
 };
 
@@ -63,10 +59,9 @@ struct SaveInfo {
 };
 
 struct Installed {
-  bool disc[2] = {};    // game/, game2/
-  bool update[2] = {};  // Title Update 9 in each
+  bool game = false;    // game/
+  bool update = false;  // Title Update 4 in it
   int dlc = 0;          // DLC packs in dlc/
-  bool textures = false;  // textures/ (made here, or copied in)
   int saves = 0;
   std::vector<SaveInfo> save_list;  // (the newest first)
 };
@@ -74,10 +69,10 @@ struct Installed {
 fs::path Folder(const fs::path& app);  // <app>/install (made if missing)
 Installed Check(const fs::path& app);
 std::vector<Source> Scan(const fs::path& app);
-// The ones installed without being asked, as the menu opens: the discs, TU9, the DLC.
+// The ones installed without being asked, as the menu opens: the disc, the title update, the DLC.
 bool Automatic(Kind kind);
 
-enum class Remove { kDisc1, kDisc2, kUpdate, kDlc, kTextures };
+enum class Remove { kGame, kUpdate, kDlc };
 
 // One job at a time, on its own thread.
 class Job {
@@ -98,7 +93,7 @@ class Job {
 
   // What the installs took from install/ (disc images, title update and DLC packages): kept there
   // until the user says to delete them (DeleteLeftovers) or to keep them (KeepLeftovers: noted in
-  // install/kept.txt, so they aren't installed again). The texture pack's files go by themselves.
+  // install/kept.txt, so they aren't installed again).
   std::vector<fs::path> Leftovers() const;
   uint64_t LeftoverBytes() const;
   bool DeleteLeftovers(const fs::path& app);
@@ -121,14 +116,7 @@ class Job {
 
 Job& TheJob();
 
-// The HD textures (mgr_textures_install.cpp): the app's list of them, whether a pack is in install/,
-// and the job's work (made from the pack's archives, which are deleted after).
-fs::path TextureList(const fs::path& app);
-int TexturePackFound(const fs::path& app);
-bool BuildTextures(const fs::path& app, std::atomic<uint64_t>& done, std::atomic<uint64_t>& total,
-                   std::string& result);
-
-// The installer payload (mgr_install.cpp), for mgr_textures_install.cpp: one job run by it (kUnavailable:
+// The installer payload (mgr_install.cpp): one job run by it (kUnavailable:
 // no payload loader), what it staged moved into place, a path as one inside the app's folder.
 namespace payload {
 enum class Ran { kUnavailable, kDone, kFailed };
