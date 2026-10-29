@@ -152,7 +152,11 @@ void MgrApp::OnPreSetup(rex::RuntimeConfig& config) {
   if (!config.graphics && config.gpu_plugin.empty()) config.gpu_plugin = "xenos";
   // Xenia's defaults otherwise: Xenia Canary plays it with no issues
   // (xenia-canary/game-compatibility#645). mgr.toml beside eboot.bin can set
-  // any of these to try another way.
+  // any of these to try another way. The title screen binds textures whose
+  // fetch constants are typed "invalid" (all zero): drawn, as Xenia suggests,
+  // instead of the draw being dropped.
+  if (!rex::cvar::HasNonDefaultValue("gpu_allow_invalid_fetch_constants"))
+    rex::cvar::SetLaunchFlag("gpu_allow_invalid_fetch_constants", "true");
   REXLOG_INFO("Metal Gear Rising: Revengeance: readback_resolve={} gpu_allow_invalid_fetch_constants={} "
               "render_target_path_vulkan={}",
               rex::cvar::GetFlagByName("readback_resolve"),
