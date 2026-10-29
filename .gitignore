@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+assets/
+generated/
+/out/
+/fw/
+/tri
+/cd/
+*.key
+*key*.txt
