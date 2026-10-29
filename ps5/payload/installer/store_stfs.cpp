@@ -213,7 +213,10 @@ bool Package::read(const Entry &e, const std::function<bool(const std::uint8_t *
         std::uint32_t run = 1, last = block, after = kEnd;
         for (;;)
         {
-            if (!next_block(last, after)) return false;
+            /* (a contiguous file's blocks follow one another: its hash entries' links aren't read, the
+             * Blade Wolf DLC's being wrong partway through) */
+            if (e.contiguous) after = last + 1;
+            else if (!next_block(last, after)) return false;
             if (run >= 170 || used + run >= e.blocks || std::uint64_t(run) * kBlock >= left || after == kEnd ||
                 offset_of(after) != at + std::uint64_t(run) * kBlock)
                 break;

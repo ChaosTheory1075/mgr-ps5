@@ -1,12 +1,15 @@
 // Metal Gear Rising: Revengeance - ReXGlue recompiled app (see mgr_app.h).
 #include "mgr_app.h"
 
+#include <cstdio>
 #include <system_error>
 
 #include <rex/cvar.h>
 #include <rex/logging.h>
+#include <rex/memory.h>
 #include <rex/platform.h>
 #include <rex/system/kernel_state.h>
+#include <rex/system/xthread.h>
 
 #include "mgr_init.h"
 #include "ps5/mgr_install.h"
@@ -36,6 +39,33 @@ fs::path g_app_root;
 rex::PathConfig ResolvePaths(const rex::PathConfig& defaults);
 
 }  // namespace
+
+// The crash line's guest half (ps5_diag.cpp, patched in by ci/patch_framework.py):
+// the faulting thread's volatile registers (kept in its context), LR, CTR, and
+// its callers from the stack's back chain. Runs in the fault handler: no heap.
+extern "C" int rex_guest_fault_report(char* out, int capacity) {
+  auto* thread = rex::system::XThread::GetCurrentThread();
+  if (!thread || !thread->thread_state() || !thread->thread_state()->context()) return 0;
+  const auto* c = thread->thread_state()->context();
+  int n = std::snprintf(out, size_t(capacity),
+                        "thread %X lr %08X ctr %08X r1 %08X r3 %08X r4 %08X r5 %08X r6 %08X r7 %08X r8 %08X "
+                        "r9 %08X r10 %08X r11 %08X r12 %08X | callers",
+                        thread->handle(), uint32_t(c->lr), c->ctr.u32, c->r1.u32, c->r3.u32, c->r4.u32, c->r5.u32,
+                        c->r6.u32, c->r7.u32, c->r8.u32, c->r9.u32, c->r10.u32, c->r11.u32, c->r12.u32);
+  auto* kernel = REX_KERNEL_STATE();
+  const uint32_t lo = thread->guest_stack_limit(), hi = thread->guest_stack_base();
+  uint32_t sp = c->r1.u32;
+  for (int i = 0; kernel && i < 16 && n > 0 && n < capacity - 12; ++i) {
+    // (only inside this thread's stack: it's committed)
+    if (sp < lo || sp + 4 > hi || (sp & 3)) break;
+    const uint32_t back = rex::memory::load_and_swap<uint32_t>(kernel->memory()->TranslateVirtual(sp));
+    if (back <= sp || back < lo + 8 || back > hi) break;
+    const uint32_t lr = rex::memory::load_and_swap<uint32_t>(kernel->memory()->TranslateVirtual(back - 8));
+    n += std::snprintf(out + n, size_t(capacity - n), " %08X", lr);
+    sp = back;
+  }
+  return n;
+}
 
 std::unique_ptr<rex::ui::WindowedApp> MgrApp::Create(rex::ui::WindowedAppContext& ctx) {
   return std::unique_ptr<MgrApp>(new MgrApp(ctx, "mgr", PPCImageConfig));

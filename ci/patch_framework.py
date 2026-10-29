@@ -60,6 +60,56 @@ def main():
          "if(REXGLUE_USE_VULKAN)\n    if(REXGLUE_BUILD_TESTS)\n",
          "if(REXGLUE_USE_VULKAN AND NOT MGR_NO_GTA4_NATIVE)\n    if(REXGLUE_BUILD_TESTS)\n")
 
+    # STFS packages: a contiguous file's blocks follow one another, as the
+    # Xbox 360 reads them; its hash entries' next-block links aren't needed.
+    # The Blade Wolf DLC's are wrong partway through movie/evd020.usm (the
+    # reader then asked for a hash table 4.7 GB into an 857 MB package), so
+    # the walk only follows the links for fragmented files.
+    edit(sdk / "src" / "filesystem" / "devices" / "stfs_container_device.cpp",
+         "          remaining_size -= block_size;\n"
+         "          auto block_hash = GetBlockHash(block_index);\n",
+         "          remaining_size -= block_size;\n"
+         "          if (dir_entry.flags.contiguous) {  // [mgr]\n"
+         "            ++block_index;\n"
+         "            continue;\n"
+         "          }\n"
+         "          auto block_hash = GetBlockHash(block_index);\n")
+
+    # Bring-up: every file the game opens, and every one it looks for and
+    # doesn't find, in the log (the game's data is a few CRI archives, so few
+    # lines). The framework had them at debug and trace only.
+    io = sdk / "src" / "kernel" / "xboxkrnl" / "xboxkrnl_io.cpp"
+    edit(io,
+         "    REXKRNL_DEBUG(\"[NtCreateFile] not found: path='{}' -> {:#x}\", target_path, result);\n",
+         "    REXKRNL_INFO(\"[NtCreateFile] not found: path='{}' -> {:#x}\", target_path, result);  // [mgr]\n")
+    edit(io,
+         "    REXKRNL_IMPORT_RESULT(\"NtCreateFile\", \"{:#x} handle={:#x}\", result, handle);\n",
+         "    REXKRNL_IMPORT_RESULT(\"NtCreateFile\", \"{:#x} handle={:#x}\", result, handle);\n"
+         "    REXKRNL_INFO(\"[NtCreateFile] {} -> handle {:#x}\", target_path, handle);  // [mgr]\n")
+
+    # A guest crash's own state in the crash line: the app's
+    # rex_guest_fault_report (mgr_app.cpp) writes the faulting thread's guest
+    # registers and callers into a static buffer (no heap in the handler).
+    diag = sdk / "src" / "core" / "ps5_diag.cpp"
+    edit(diag, "struct RawLine {\n  char text[2048];\n", "struct RawLine {\n  char text[4096];  // [mgr] (with the guest's state)\n")
+    edit(diag,
+         "std::atomic<uint64_t> crashed_at_ms{0};\n",
+         "std::atomic<uint64_t> crashed_at_ms{0};\n"
+         "// [mgr] the faulting thread's guest state, from the app (no heap)\n"
+         "extern \"C\" __attribute__((weak)) int rex_guest_fault_report(char* out, int capacity);\n")
+    edit(diag,
+         "  line.Add(\"\\n\");\n"
+         "  const char* path = log_path[0] ? log_path : \"/app0/logs/crash.log\";\n",
+         "  if (rex_guest_fault_report) {  // [mgr]\n"
+         "    static char guest[1536];\n"
+         "    if (rex_guest_fault_report(guest, int(sizeof(guest))) > 0) {\n"
+         "      line.Add(\"\\n[ps5 crash] guest: \");\n"
+         "      line.Add(guest);\n"
+         "    }\n"
+         "  }\n"
+         "  line.Add(\"\\n\");\n"
+         "  const char* path = log_path[0] ? log_path : \"/app0/logs/crash.log\";\n")
+
     # XamSwapDisc reaches an app that defines rex_app_swap_disc (Max Payne 3's
     # disc 2); without one (this game has one disc), the stub as before.
     xam_info = sdk / "src" / "kernel" / "xam" / "xam_info.cpp"
