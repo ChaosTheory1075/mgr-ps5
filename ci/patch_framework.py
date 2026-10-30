@@ -204,6 +204,10 @@ def main():
   // Returns whether any page was invalidated.
   bool CheckDynamicRange(uint32_t start, uint32_t length, bool always);
   uint32_t frame() const { return hot_frame_.load(std::memory_order_relaxed); }
+  // [mgr] A linear texture (a movie frame's plane): its guest data hashed (the movie log), and
+  // its range invalidated so that it's reloaded from guest memory, whatever the watches say.
+  uint64_t HashGuestRange(uint32_t start, uint32_t length);
+  void InvalidateRangeNow(uint32_t start, uint32_t length);
 """)
     edit(sm_h,
          """  std::vector<uint32_t> hot_page_checked_batch_;
@@ -297,6 +301,40 @@ thread_local bool invalidation_from_write = false;  // [crackdown]
   return invalidated;
 }
 
+uint64_t SharedMemory::HashGuestRange(uint32_t start, uint32_t length) {
+  // [mgr]
+  if (!length || start >= kBufferSize) {
+    return 0;
+  }
+  length = std::min(length, kBufferSize - start);
+  return XXH3_64bits(memory_.TranslatePhysical(start), length);
+}
+
+void SharedMemory::InvalidateRangeNow(uint32_t start, uint32_t length) {
+  // [mgr] (as CheckStalePages does for a changed page, each physical view's watches included)
+  if (!length || start >= kBufferSize) {
+    return;
+  }
+  length = std::min(length, kBufferSize - start);
+  const uint32_t page_size = uint32_t(1) << page_size_log2_;
+  const uint32_t first = start & ~(page_size - 1);
+  const uint32_t size = ((start + length - first) + page_size - 1) & ~(page_size - 1);
+  for (uint32_t page = first >> page_size_log2_; page < ((first + size) >> page_size_log2_) &&
+                                                 page < page_hashes_.size();
+       ++page) {
+    page_hashes_[page] = 0;
+  }
+  memory_.TriggerPhysicalMemoryCallbacks(rex::thread::global_critical_region::AcquireDirect(),
+                                         0xA0000000u + first, size, true, true);
+  memory_.TriggerPhysicalMemoryCallbacks(rex::thread::global_critical_region::AcquireDirect(),
+                                         0xC0000000u + first, size, true, true);
+  if (first >= 0x1000) {
+    memory_.TriggerPhysicalMemoryCallbacks(rex::thread::global_critical_region::AcquireDirect(),
+                                           0xE0000000u + first - 0x1000, size, true, true);
+  }
+  MemoryInvalidationCallback(first, size, true);
+}
+
 namespace {
 thread_local bool invalidation_from_write = false;  // [crackdown]
 """)
@@ -305,8 +343,10 @@ thread_local bool invalidation_from_write = false;  // [crackdown]
          """    void MakeUpToDateAndWatch(const rex::thread::global_lock_t& global_lock);
 """,
          """    void MakeUpToDateAndWatch(const rex::thread::global_lock_t& global_lock);
-    // [mgr] the frame its pages were last compared with their upload hashes
+    // [mgr] the frame its pages were last compared with their upload hashes; a linear one's data
+    // hash then (the movie log)
     uint32_t dynamic_check_frame = 0;
+    uint64_t dynamic_content_hash = 0;
 """)
     edit(tc_h,
          """  uint64_t current_submission_index_ = 0;
@@ -315,6 +355,57 @@ thread_local bool invalidation_from_write = false;  // [crackdown]
   uint32_t dynamic_check_frame_ = 0;  // [mgr]
 """)
     tc = sdk / "src" / "graphics" / "pipeline" / "texture" / "cache.cpp"
+    # The movie log: each second a linear texture is drawn, how many frames drew it and in how
+    # many of them the game had written new data into it. A freeze with new data each frame is
+    # the GPU's side; one with none, the game's (its decoder or its clock).
+    edit(tc,
+         """void TextureCache::RequestTextures(uint32_t used_texture_mask) {
+""",
+         """namespace {
+// [mgr] the movie log
+struct MovieLogEntry {
+  uint32_t base = 0, frames = 0, changed = 0, last_frame = 0;
+};
+MovieLogEntry g_movie_log[8];
+std::chrono::steady_clock::time_point g_movie_log_time;
+void MovieLogFrame(uint32_t base, uint32_t frame, bool changed) {
+  const auto now = std::chrono::steady_clock::now();
+  if (now - g_movie_log_time >= std::chrono::seconds(1)) {
+    std::string line;
+    for (MovieLogEntry& e : g_movie_log) {
+      if (e.frames) {
+        line += fmt::format(" {:08X}: {} new of {}", e.base, e.changed, e.frames);
+      }
+      e = MovieLogEntry();
+    }
+    if (!line.empty()) {
+      REXGPU_INFO("mgr movie 1 s (linear textures: frames with new data of frames drawn):{}", line);
+    }
+    g_movie_log_time = now;
+  }
+  MovieLogEntry* slot = nullptr;
+  for (MovieLogEntry& e : g_movie_log) {
+    if (e.frames && e.base == base) {
+      slot = &e;
+      break;
+    }
+    if (!slot && !e.frames) {
+      slot = &e;
+    }
+  }
+  if (!slot || slot->last_frame == frame + 1) {
+    return;
+  }
+  slot->base = base;
+  slot->last_frame = frame + 1;
+  ++slot->frames;
+  slot->changed += changed ? 1 : 0;
+}
+}  // namespace
+
+void TextureCache::RequestTextures(uint32_t used_texture_mask) {
+""")
+    edit(tc, "#include <mutex>\n", "#include <chrono>\n#include <mutex>\n#include <string>\n\n#include <fmt/format.h>\n")
     edit(tc,
          """    ResetTextureBindings();
   }
@@ -347,6 +438,17 @@ thread_local bool invalidation_from_write = false;  // [crackdown]
       dynamic->dynamic_check_frame = dynamic_frame;
       const TextureKey dynamic_key = dynamic->key();
       if (dynamic_key.scaled_resolve || !dynamic->GetGuestBaseSize()) {
+        continue;
+      }
+      if (!dynamic_key.tiled) {
+        // [mgr] a linear texture (the movie's planes): reloaded every frame, and whether its data
+        // changed counted for the movie log
+        const uint32_t base = dynamic_key.base_page << 12;
+        const uint64_t hash = shared_memory().HashGuestRange(base, dynamic->GetGuestBaseSize());
+        MovieLogFrame(base, dynamic_frame, hash != dynamic->dynamic_content_hash);
+        dynamic->dynamic_content_hash = hash;
+        shared_memory().InvalidateRangeNow(base, dynamic->GetGuestBaseSize());
+        (dynamic == binding.texture ? load_unsigned_data : load_signed_data) = true;
         continue;
       }
       if (shared_memory().CheckDynamicRange(dynamic_key.base_page << 12, dynamic->GetGuestBaseSize(),
