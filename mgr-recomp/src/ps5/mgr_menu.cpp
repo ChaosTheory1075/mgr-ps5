@@ -892,12 +892,18 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     y = DrawJob(dl, left, y, 820 * u) + 10 * u;
     // the rest of install/: what can't be installed, and why
     std::vector<std::string> notes;
+    int avatar_items = 0;
     for (const auto& s : sources_) {
       if (s.kind == install::Kind::kArchive)
         notes.push_back(Short(s.label, 40) + "  -  extract it on a PC first (7-Zip)");
+      else if (s.kind == install::Kind::kOther && s.label == install::kAvatarItemLabel)
+        ++avatar_items;
       else if (s.kind == install::Kind::kOther)
         notes.push_back(Short(s.label, 60));
     }
+    if (avatar_items)
+      notes.push_back(std::to_string(avatar_items) + (avatar_items == 1 ? " Xbox 360 avatar item" : " Xbox 360 avatar items") +
+                      "  -  not game DLC, not used here");
     if (!notes.empty()) {
       dl->AddText(g_body, 20 * u, ImVec2(left, y), P(kRed), "ALSO IN PPSA48080/INSTALL");
       y += 34 * u;

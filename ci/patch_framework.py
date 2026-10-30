@@ -129,6 +129,41 @@ def main():
          "    auto* creator = XThread::GetCurrentThread();\n"
          "    return (creator && creator->is_guest_thread()) ? creator->active_cpu() : 0;\n")
 
+    # File writes from physical memory through the raw mapping, as the reads
+    # already are (XFile::ReadInternalLocked): the guest's view of a physical
+    # page can be protected for the GPU's write watches, which the host's
+    # write() can't fault through as the game's own code does. Metal Gear
+    # Rising builds its save in physical memory: its saves came out as mostly
+    # zeros, and the game couldn't read them back ("Failed to read save data").
+    edit(sdk / "src" / "system" / "xfile.cpp",
+         "  size_t bytes_written = 0;\n"
+         "  X_STATUS result = file_->WriteSync(\n"
+         "      std::span<const uint8_t>(memory()->TranslateVirtual(buffer_guest_address), buffer_length),\n"
+         "      size_t(byte_offset), &bytes_written);\n",
+         "  size_t bytes_written = 0;\n"
+         "  // [mgr] physical memory through the raw mapping (no GPU watch protection)\n"
+         "  rex::memory::BaseHeap* write_heap = memory()->LookupHeap(buffer_guest_address);\n"
+         "  const uint8_t* write_source =\n"
+         "      write_heap && write_heap->heap_type() == memory::HeapType::kGuestPhysical\n"
+         "          ? memory()->TranslatePhysical(\n"
+         "                static_cast<rex::memory::PhysicalHeap*>(write_heap)->GetPhysicalAddress(buffer_guest_address))\n"
+         "          : memory()->TranslateVirtual(buffer_guest_address);\n"
+         "  X_STATUS result = file_->WriteSync(std::span<const uint8_t>(write_source, buffer_length),\n"
+         "                                     size_t(byte_offset), &bytes_written);\n")
+
+    # The physical pages' stale-protection recovery is right, but it logged
+    # every one: 120,000 lines in a session (some 350 a second in play), each
+    # a write to the log file from the faulting thread. The first 20, then a
+    # count every 10,000.
+    edit(sdk / "src" / "system" / "xmemory.cpp",
+         "                               rex::memory::PageAccess::kReadWrite, nullptr)) {\n"
+         "        REXSYS_WARN(\n",
+         "                               rex::memory::PageAccess::kReadWrite, nullptr)) {\n"
+         "        static std::atomic<uint64_t> recovered{0};  // [mgr]\n"
+         "        const uint64_t n = ++recovered;\n"
+         "        if (n % 10000 == 0) REXSYS_INFO(\"Recovered stale physical page protection: {} times\", n);\n"
+         "        if (n <= 20) REXSYS_WARN(\n")
+
     # XamSwapDisc reaches an app that defines rex_app_swap_disc (Max Payne 3's
     # disc 2); without one (this game has one disc), the stub as before.
     xam_info = sdk / "src" / "kernel" / "xam" / "xam_info.cpp"

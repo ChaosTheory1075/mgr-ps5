@@ -60,6 +60,8 @@ namespace {
 constexpr uint32_t kTitleId = 0x4B4E080A;
 constexpr const char* kTitleFolder = "4B4E080A";
 constexpr uint32_t kTypeSave = 0x00000001, kTypeDlc = 0x00000002, kTypeUpdate = 0x000B0000;
+// Avatar items (shirts and props for the Xbox 360 avatar): nothing on the PS5 uses them.
+constexpr uint32_t kTypeAvatarItem = 0x00009000;
 // The title update's default.xexp (Title Update 4, the last one: "v4")
 constexpr uint64_t kUpdateXexpSize = 3258368;
 constexpr const char* kBackupMarker = "mgr-backup.txt";
@@ -728,6 +730,8 @@ std::vector<Source> Scan(const fs::path& app) {
         out.push_back(s);
       } else if (h.type == kTypeSave) {
         out.push_back({Kind::kSave, p, name.empty() ? file : name});
+      } else if (h.type == kTypeAvatarItem) {
+        out.push_back({Kind::kOther, p, kAvatarItemLabel});
       } else {
         out.push_back({Kind::kOther, p, file});
       }

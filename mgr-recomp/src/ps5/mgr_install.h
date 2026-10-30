@@ -72,6 +72,9 @@ std::vector<Source> Scan(const fs::path& app);
 // The ones installed without being asked, as the menu opens: the disc, the title update, the DLC.
 bool Automatic(Kind kind);
 
+// The label of an Xbox 360 avatar item's package (Kind::kOther): the menu counts them in one line.
+inline constexpr const char* kAvatarItemLabel = "avatar item";
+
 enum class Remove { kGame, kUpdate, kDlc };
 
 // One job at a time, on its own thread.
