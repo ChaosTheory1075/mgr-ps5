@@ -201,6 +201,25 @@ def main():
          "    SaveTrace(false);  // [mgr]\n"
          "    REXSYS_INFO(\"[PortableSave] Closed '{}' and unmounted '{}:' from '{}'\", package_name,\n")
 
+    # NtReadFile on an asynchronous file (opened without FILE_SYNCHRONOUS_IO)
+    # returns STATUS_PENDING, its outcome in the I/O status block, as Xenia's
+    # and NtWriteFile here do - also when the read was done on the spot. The
+    # fork returned STATUS_SUCCESS then: Metal Gear Rising's save loading
+    # takes only the pending path as a read, and showed "Failed to read save
+    # data" for every save.
+    edit(io,
+         "    completion.Complete(result, bytes_read);\n"
+         "    REXKRNL_IMPORT_RESULT(\n"
+         "        \"NtReadFile\", \"{:#x} inline=1 synchronous={} completion_port={} wait={} transferred={}\",\n"
+         "        result, file->is_synchronous(), has_completion_port, ev ? \"event\" : \"file\", bytes_read);\n"
+         "    return result;\n",
+         "    completion.Complete(result, bytes_read);\n"
+         "    REXKRNL_IMPORT_RESULT(\n"
+         "        \"NtReadFile\", \"{:#x} inline=1 synchronous={} completion_port={} wait={} transferred={}\",\n"
+         "        result, file->is_synchronous(), has_completion_port, ev ? \"event\" : \"file\", bytes_read);\n"
+         "    if (XSUCCEEDED(result) && !file->is_synchronous()) return X_STATUS_PENDING;  // [mgr]\n"
+         "    return result;\n")
+
     # XamSwapDisc reaches an app that defines rex_app_swap_disc (Max Payne 3's
     # disc 2); without one (this game has one disc), the stub as before.
     xam_info = sdk / "src" / "kernel" / "xam" / "xam_info.cpp"
