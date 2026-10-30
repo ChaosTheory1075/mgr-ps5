@@ -176,42 +176,187 @@ def main():
          "        if (n % 10000 == 0) REXSYS_INFO(\"Recovered stale physical page protection: {} times\", n);\n"
          "        if (n <= 20) REXSYS_WARN(\n")
 
-    # Save bring-up: every kernel call while a save is mounted (and 3 s after
-    # it closes, where the game decides whether it read) in the log - the
-    # trace-level, "noisy" import logging, which is off otherwise.
-    cm = sdk / "src" / "system" / "xam" / "content_manager.cpp"
-    edit(cm, "#include <rex/system/xobject.h>\n",
-         "#include <rex/system/xobject.h>\n#include <rex/cvar.h>\n#include <atomic>\n#include <chrono>\n#include <thread>\n"
-         "namespace {\n"
-         "// [mgr] the trace window around a save's use\n"
-         "std::atomic<uint64_t> g_save_trace_generation{0};\n"
-         "void SaveTrace(bool on) {\n"
-         "  const uint64_t generation = ++g_save_trace_generation;\n"
-         "  if (on) {\n"
-         "    rex::cvar::SetFlagByName(\"log_noisy\", \"true\");\n"
-         "    rex::cvar::SetFlagByName(\"log_level\", \"trace\");\n"
-         "    return;\n"
-         "  }\n"
-         "  std::thread([generation] {\n"
-         "    std::this_thread::sleep_for(std::chrono::seconds(3));\n"
-         "    if (g_save_trace_generation.load() != generation) return;  // (another save opened since)\n"
-         "    rex::cvar::SetFlagByName(\"log_level\", \"info\");\n"
-         "    rex::cvar::SetFlagByName(\"log_noisy\", \"false\");\n"
-         "  }).detach();\n"
-         "}\n"
-         "}  // namespace\n")
-    edit(cm,
-         "    REXSYS_INFO(\"[PortableSave] Created and mounted '{}' as '{}:' from '{}'\", data.file_name(),\n",
-         "    SaveTrace(true);  // [mgr]\n"
-         "    REXSYS_INFO(\"[PortableSave] Created and mounted '{}' as '{}:' from '{}'\", data.file_name(),\n")
-    edit(cm,
-         "    REXSYS_INFO(\"[PortableSave] Opened and mounted '{}' as '{}:' from '{}'\", data.file_name(),\n",
-         "    SaveTrace(true);  // [mgr]\n"
-         "    REXSYS_INFO(\"[PortableSave] Opened and mounted '{}' as '{}:' from '{}'\", data.file_name(),\n")
-    edit(cm,
-         "    REXSYS_INFO(\"[PortableSave] Closed '{}' and unmounted '{}:' from '{}'\", package_name,\n",
-         "    SaveTrace(false);  // [mgr]\n"
-         "    REXSYS_INFO(\"[PortableSave] Closed '{}' and unmounted '{}:' from '{}'\", package_name,\n")
+    # Cutscene movies (CRI Sofdec, decoded by the CPU into the same few
+    # textures every frame) froze for up to 9 s while their sound went on:
+    # the frames reached the GPU only when a write watch happened to fire or
+    # the stale page scan (128 pages a frame: all memory in about 8.5 s at
+    # 30 FPS) came round to them. mgr_004.log: the title movie's planes
+    # reloaded every frame on its first showing, and the scan found the
+    # cutscene movie's pages (08B74000-08B7C000) changed with no watch fired.
+    # Whatever leaves a page unwatched (the 16 KB host pages hold four guest
+    # pages, the E0 view is 4 KB off the others, the hot page list fills), a
+    # texture the CPU rewrites no longer depends on the watches: the first
+    # draw of each frame that binds it compares its pages with the hashes
+    # taken at their upload, and a changed page is invalidated as a fired
+    # watch would, so the texture is reloaded for that draw. Checked: linear
+    # textures (the movie's planes; the game's other textures are tiled) and
+    # textures on pages the CPU changed in the last 300 frames; at most 16 MB
+    # hashed a frame.
+    sm_h = sdk / "include" / "rex" / "graphics" / "shared_memory.h"
+    edit(sm_h,
+         """  uint32_t CheckStalePages(uint32_t pages_per_frame);
+""",
+         """  uint32_t CheckStalePages(uint32_t pages_per_frame);
+
+  // [mgr] The pages of a texture's range compared with their hashes taken at upload (once a
+  // frame a texture, from TextureCache::RequestTextures); a changed page is invalidated as a
+  // fired write watch would. always: checked even if the CPU didn't change its pages lately.
+  // Returns whether any page was invalidated.
+  bool CheckDynamicRange(uint32_t start, uint32_t length, bool always);
+  uint32_t frame() const { return hot_frame_.load(std::memory_order_relaxed); }
+""")
+    edit(sm_h,
+         """  std::vector<uint32_t> hot_page_checked_batch_;
+""",
+         """  std::vector<uint32_t> hot_page_checked_batch_;
+  // [mgr] CheckDynamicRange's budget
+  static constexpr uint32_t kDynamicCheckBytesPerFrame = 16u << 20;
+  uint32_t dynamic_check_frame_ = 0;
+  uint32_t dynamic_check_bytes_ = 0;
+""")
+    edit(sdk / "src" / "graphics" / "shared_memory.cpp",
+         """namespace {
+thread_local bool invalidation_from_write = false;  // [crackdown]
+""",
+         """bool SharedMemory::CheckDynamicRange(uint32_t start, uint32_t length, bool always) {
+  // [mgr]
+  if (!length || start >= kBufferSize || page_hashes_.size() != (kBufferSize >> page_size_log2_)) {
+    return false;
+  }
+  const uint32_t page_size = uint32_t(1) << page_size_log2_;
+  const uint32_t frame = hot_frame_.load(std::memory_order_relaxed);
+  const uint32_t page_first = start >> page_size_log2_;
+  const uint32_t page_last = std::min(uint32_t((uint64_t(start) + length - 1) >> page_size_log2_),
+                                      uint32_t(page_hashes_.size() - 1));
+  if (!always) {
+    bool recent = false;
+    for (uint32_t page = page_first; page <= page_last && !recent; ++page) {
+      const uint32_t last = page_invalidation_frame_[page];
+      recent = last && frame - last <= kHotPageQuietFrames;
+    }
+    if (!recent) {
+      return false;
+    }
+  }
+  if (dynamic_check_frame_ != frame) {
+    dynamic_check_frame_ = frame;
+    dynamic_check_bytes_ = 0;
+  }
+  bool invalidated = false;
+  for (uint32_t page = page_first; page <= page_last; ++page) {
+    if (dynamic_check_bytes_ >= kDynamicCheckBytesPerFrame) {
+      break;
+    }
+    const uint64_t stored = page_hashes_[page];
+    if (!stored) {
+      continue;
+    }
+    const uint32_t address = page << page_size_log2_;
+    const uint32_t block = page >> 6;
+    const uint64_t bit = uint64_t(1) << (page & 63);
+    {
+      // (as CheckStalePages: a valid page is committed; GPU-written ones and those the guest made
+      // unreadable are left alone)
+      auto global_lock = global_critical_region_.Acquire();
+      const uint64_t* valid_flags = active_valid_flags_.load(std::memory_order_relaxed);
+      if (!valid_flags || !(valid_flags[block] & bit) ||
+          (system_page_flags_valid_and_gpu_written_[block] & bit)) {
+        continue;
+      }
+      uint32_t protect = 0;
+      auto* physical_heap = memory_.GetPhysicalHeap();
+      if (!physical_heap || !physical_heap->QueryProtect(address, &protect) ||
+          !(protect & memory::kMemoryProtectRead)) {
+        continue;
+      }
+      dynamic_check_bytes_ += page_size;
+      if (XXH3_64bits(memory_.TranslatePhysical(address), page_size) == stored) {
+        continue;
+      }
+    }
+    page_hashes_[page] = 0;
+    memory_.TriggerPhysicalMemoryCallbacks(rex::thread::global_critical_region::AcquireDirect(),
+                                           0xA0000000u + address, page_size, true, true);
+    memory_.TriggerPhysicalMemoryCallbacks(rex::thread::global_critical_region::AcquireDirect(),
+                                           0xC0000000u + address, page_size, true, true);
+    if (address >= 0x1000) {
+      memory_.TriggerPhysicalMemoryCallbacks(rex::thread::global_critical_region::AcquireDirect(),
+                                             0xE0000000u + address - 0x1000, page_size, true, true);
+    }
+    MemoryInvalidationCallback(address, page_size, true);
+    invalidated = true;
+  }
+  if (invalidated) {
+    static std::atomic<uint64_t> dynamic_reloads{0};
+    const uint64_t n = ++dynamic_reloads;
+    if (n <= 5 || !(n & (n - 1))) {
+      REXGPU_INFO("mgr: a CPU-written texture at {:08X} changed with no write watch fired ({} so far)",
+                  start, n);
+    }
+  }
+  return invalidated;
+}
+
+namespace {
+thread_local bool invalidation_from_write = false;  // [crackdown]
+""")
+    tc_h = sdk / "include" / "rex" / "graphics" / "pipeline" / "texture" / "cache.h"
+    edit(tc_h,
+         """    void MakeUpToDateAndWatch(const rex::thread::global_lock_t& global_lock);
+""",
+         """    void MakeUpToDateAndWatch(const rex::thread::global_lock_t& global_lock);
+    // [mgr] the frame its pages were last compared with their upload hashes
+    uint32_t dynamic_check_frame = 0;
+""")
+    edit(tc_h,
+         """  uint64_t current_submission_index_ = 0;
+""",
+         """  uint64_t current_submission_index_ = 0;
+  uint32_t dynamic_check_frame_ = 0;  // [mgr]
+""")
+    tc = sdk / "src" / "graphics" / "pipeline" / "texture" / "cache.cpp"
+    edit(tc,
+         """    ResetTextureBindings();
+  }
+
+  // Update the texture keys and the textures.
+""",
+         """    ResetTextureBindings();
+  }
+
+  // [mgr] each frame's first draws look at every binding again (CheckDynamicRange)
+  const uint32_t dynamic_frame = shared_memory().frame();
+  if (dynamic_frame != dynamic_check_frame_) {
+    dynamic_check_frame_ = dynamic_frame;
+    texture_bindings_in_sync_ = 0;
+  }
+
+  // Update the texture keys and the textures.
+""")
+    edit(tc,
+         """    if (g_before_texture_read) {
+      Texture* loading = load_unsigned_data ? binding.texture
+""",
+         """    // [mgr] a texture the CPU rewrites (a cutscene movie's frame): its pages compared with their
+    // upload hashes once a frame, reloaded if they changed with no write watch fired
+    for (Texture* dynamic : {binding.texture, binding.texture_signed}) {
+      if (!dynamic || dynamic->dynamic_check_frame == dynamic_frame ||
+          (dynamic->outdated_mask() & Texture::kOutdatedBitBase)) {
+        continue;
+      }
+      dynamic->dynamic_check_frame = dynamic_frame;
+      const TextureKey dynamic_key = dynamic->key();
+      if (dynamic_key.scaled_resolve || !dynamic->GetGuestBaseSize()) {
+        continue;
+      }
+      if (shared_memory().CheckDynamicRange(dynamic_key.base_page << 12, dynamic->GetGuestBaseSize(),
+                                            !dynamic_key.tiled)) {
+        (dynamic == binding.texture ? load_unsigned_data : load_signed_data) = true;
+      }
+    }
+    if (g_before_texture_read) {
+      Texture* loading = load_unsigned_data ? binding.texture
+""")
 
     # NtReadFile on an asynchronous file (opened without FILE_SYNCHRONOUS_IO)
     # returns STATUS_PENDING, its outcome in the I/O status block, as Xenia's
