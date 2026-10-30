@@ -164,6 +164,43 @@ def main():
          "        if (n % 10000 == 0) REXSYS_INFO(\"Recovered stale physical page protection: {} times\", n);\n"
          "        if (n <= 20) REXSYS_WARN(\n")
 
+    # Save bring-up: every kernel call while a save is mounted (and 3 s after
+    # it closes, where the game decides whether it read) in the log - the
+    # trace-level, "noisy" import logging, which is off otherwise.
+    cm = sdk / "src" / "system" / "xam" / "content_manager.cpp"
+    edit(cm, "#include <rex/system/xobject.h>\n",
+         "#include <rex/system/xobject.h>\n#include <rex/cvar.h>\n#include <atomic>\n#include <chrono>\n#include <thread>\n"
+         "namespace {\n"
+         "// [mgr] the trace window around a save's use\n"
+         "std::atomic<uint64_t> g_save_trace_generation{0};\n"
+         "void SaveTrace(bool on) {\n"
+         "  const uint64_t generation = ++g_save_trace_generation;\n"
+         "  if (on) {\n"
+         "    rex::cvar::SetFlagByName(\"log_noisy\", \"true\");\n"
+         "    rex::cvar::SetFlagByName(\"log_level\", \"trace\");\n"
+         "    return;\n"
+         "  }\n"
+         "  std::thread([generation] {\n"
+         "    std::this_thread::sleep_for(std::chrono::seconds(3));\n"
+         "    if (g_save_trace_generation.load() != generation) return;  // (another save opened since)\n"
+         "    rex::cvar::SetFlagByName(\"log_level\", \"info\");\n"
+         "    rex::cvar::SetFlagByName(\"log_noisy\", \"false\");\n"
+         "  }).detach();\n"
+         "}\n"
+         "}  // namespace\n")
+    edit(cm,
+         "    REXSYS_INFO(\"[PortableSave] Created and mounted '{}' as '{}:' from '{}'\", data.file_name(),\n",
+         "    SaveTrace(true);  // [mgr]\n"
+         "    REXSYS_INFO(\"[PortableSave] Created and mounted '{}' as '{}:' from '{}'\", data.file_name(),\n")
+    edit(cm,
+         "    REXSYS_INFO(\"[PortableSave] Opened and mounted '{}' as '{}:' from '{}'\", data.file_name(),\n",
+         "    SaveTrace(true);  // [mgr]\n"
+         "    REXSYS_INFO(\"[PortableSave] Opened and mounted '{}' as '{}:' from '{}'\", data.file_name(),\n")
+    edit(cm,
+         "    REXSYS_INFO(\"[PortableSave] Closed '{}' and unmounted '{}:' from '{}'\", package_name,\n",
+         "    SaveTrace(false);  // [mgr]\n"
+         "    REXSYS_INFO(\"[PortableSave] Closed '{}' and unmounted '{}:' from '{}'\", package_name,\n")
+
     # XamSwapDisc reaches an app that defines rex_app_swap_disc (Max Payne 3's
     # disc 2); without one (this game has one disc), the stub as before.
     xam_info = sdk / "src" / "kernel" / "xam" / "xam_info.cpp"
@@ -818,6 +855,22 @@ def main():
          "    using namespace rex::mgr_perf;\n"
          "    static uint64_t last_us = 0, frames = 0, prev_ns[kCount], prev_n[kCount];\n"
          "    const uint64_t now = NowUs();\n"
+         "    {\n"
+         "      // [mgr] a frame over 100 ms: when, and where the GPU thread's time went in it\n"
+         "      static uint64_t swap_us = 0, swap_ns[kCount];\n"
+         "      uint64_t cur[kCount];\n"
+         "      for (uint32_t c = 0; c < kCount; ++c) cur[c] = g_ns[c].load(std::memory_order_relaxed);\n"
+         "      if (swap_us && now - swap_us > 100000) {\n"
+         "        auto d = [&](Counter c) { return double(cur[c] - swap_ns[c]) / 1e6; };\n"
+         "        REXGPU_INFO(\"mgr frame hitch: {:.0f} ms; GPU thread: idle (waiting for the game) {:.0f}, wait_reg_mem {:.0f}, \"\n"
+         "                    \"fences {:.0f}, submit {:.0f}, draws {:.0f} (pipelines {:.0f}, texture loads {:.0f}), copies {:.0f}, \"\n"
+         "                    \"occlusion {:.0f}\",\n"
+         "                    double(now - swap_us) / 1000.0, d(kIdle), d(kWaitRegMem), d(kFenceWait), d(kSubmit), d(kDraw),\n"
+         "                    d(kPipeline), d(kTextureLoad), d(kCopy), d(kOcclusion));\n"
+         "      }\n"
+         "      swap_us = now;\n"
+         "      for (uint32_t c = 0; c < kCount; ++c) swap_ns[c] = cur[c];\n"
+         "    }\n"
          "    ++frames;\n"
          "    if (!last_us) {\n"
          "      last_us = now;\n"
