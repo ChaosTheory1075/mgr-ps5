@@ -115,6 +115,11 @@ cp "$here/../package/README.txt" "$app/README.txt"
 mkdir -p "$app/install"
 cp "$here/../package/install-README.txt" "$app/install/README.txt"
 mkdir -p "$app/hub"
+# PlayStation button icons (drawn by tools/ps_buttons.py, nothing of the game's): the HD
+# texture replacement of the game's Xbox button atlas, on with SETTINGS > BUTTON ICONS.
+echo "==> [package] PlayStation button icons"
+python3 "$here/../tools/ps_buttons.py" \
+    "$fw/glue/rexglue-sdk-main/thirdparty/tracy/profiler/src/font/Roboto-Bold.ttf" "$app/textures/ps"
 # The installer payload (ps5/payload/installer, Crackdown PS5's and GTA IV for PS5's): the app sends
 # it to the payload loader so the install is written at the drive's full speed (mgr_install.cpp).
 echo "==> [package] the installer payload"

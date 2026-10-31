@@ -12,6 +12,7 @@
 #include <rex/system/xthread.h>
 
 #include "mgr_init.h"
+#include "ps5/mgr_game_overlay.h"
 #include "ps5/mgr_install.h"
 #include "ps5/mgr_menu.h"
 #include "ps5/mgr_trophies_game.h"
@@ -114,6 +115,19 @@ void MgrApp::OnPostSetup() {
 #if REX_PLATFORM_PS5
   // The achievements' list and pictures, for the menu's Trophies page.
   if (runtime()) mgrps5::WriteTrophyCatalog(runtime(), runtime()->user_data_root());
+  // The frame rate counter and the DualSense's features (ps5/mgr_game_overlay.h).
+  mgrps5::StartGameOverlay(imgui_drawer());
+#endif
+}
+
+// The player character's constructor (Pl0000's, which Raiden's and the DLC
+// stories' classes start with: sub_822AA760, sub_822B2210, sub_822B9D30): the
+// object, for the DualSense's light bar and triggers (mgr_game_overlay.cpp).
+extern "C" void sub_822B4198(PPCContext& __restrict ctx, uint8_t* base) {
+  const uint32_t player = ctx.r3.u32;
+  __imp__sub_822B4198(ctx, base);
+#if REX_PLATFORM_PS5
+  mgrps5::NotePlayerCreated(player);
 #endif
 }
 

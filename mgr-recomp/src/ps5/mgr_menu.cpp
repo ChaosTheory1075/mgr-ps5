@@ -21,6 +21,7 @@
 #include <vector>
 
 #include <rex/cvar.h>
+#include <rex/input/sony_feedback.h>
 #include <rex/logging.h>
 #include <rex/ui/imgui_dialog.h>
 #include <rex/ui/imgui_drawer.h>
@@ -147,6 +148,10 @@ struct Settings {
   int filter = 3;     // anisotropic_override 2..5: 2x, 4x, 8x, 16x
   bool lane = true;   // the GPU's second lane (crackdown_gpu_lane)
   int music = 60;     // the menu song's level, 0..100
+  bool ps_buttons = true;      // PlayStation button icons (textures/ps: tools/ps_buttons.py)
+  bool dualsense = true;       // the light bar, adaptive triggers and added rumble (mgr_game_overlay.cpp)
+  int dualsense_strength = 2;  // 1..3: low, medium, high (gta4_sony_intensity)
+  int fps_counter = 0;         // 0 off, 1 simple, 2 detailed (mgr_fps_counter)
 
   static constexpr const char* kFilterNames[] = {"", "", "2X", "4X", "8X", "16X"};
 
@@ -163,6 +168,10 @@ struct Settings {
         if (k == "texture_filtering") s.filter = std::clamp(value, 2, 5);
         if (k == "gpu_lane") s.lane = value != 0;
         if (k == "menu_music") s.music = std::clamp(value, 0, 100);
+        if (k == "ps_buttons") s.ps_buttons = value != 0;
+        if (k == "dualsense") s.dualsense = value != 0;
+        if (k == "dualsense_strength") s.dualsense_strength = std::clamp(value, 1, 3);
+        if (k == "fps_counter") s.fps_counter = std::clamp(value, 0, 2);
       }
       std::fclose(f);
     }
@@ -171,8 +180,11 @@ struct Settings {
 
   void Save(const fs::path& app) const {
     if (std::FILE* f = std::fopen((app / "menu.ini").string().c_str(), "wb")) {
-      std::fprintf(f, "fxaa = %d\ntexture_filtering = %d\ngpu_lane = %d\nmenu_music = %d\n", fxaa ? 1 : 0, filter,
-                   lane ? 1 : 0, music);
+      std::fprintf(f,
+                   "fxaa = %d\ntexture_filtering = %d\ngpu_lane = %d\nmenu_music = %d\nps_buttons = %d\ndualsense = %d\n"
+                   "dualsense_strength = %d\nfps_counter = %d\n",
+                   fxaa ? 1 : 0, filter, lane ? 1 : 0, music, ps_buttons ? 1 : 0, dualsense ? 1 : 0,
+                   dualsense_strength, fps_counter);
       std::fclose(f);
     }
   }
@@ -187,8 +199,20 @@ struct Settings {
     rex::cvar::SetFlagByName("swap_post_effect", fxaa ? "fxaa" : "none");
     rex::cvar::SetFlagByName("anisotropic_override", std::to_string(filter));
     rex::cvar::SetFlagByName("crackdown_gpu_lane", lane ? "true" : "false");
-    REXLOG_INFO("Metal Gear Rising: Revengeance menu: anti-aliasing {}, texture filtering {}, the GPU's second lane {}",
-                fxaa ? "FXAA" : "off", kFilterNames[filter], lane ? "on" : "off");
+    // (the PlayStation icons are the only replacement textures: tools/ps_buttons.py)
+    rex::cvar::SetFlagByName("hd_textures", ps_buttons ? "true" : "false");
+    rex::cvar::SetFlagByName("hd_textures_path", "/app0/textures/ps");
+    // (the DualSense: gta4-ps5's features, fed by the game's state in mgr_game_overlay.cpp; not its
+    // touchpad swipes, which are GTA IV's weapon and radio controls)
+    rex::input::sony::SetFeaturesEnabled(dualsense);
+    rex::cvar::SetFlagByName("gta4_sony_gestures", "false");
+    rex::cvar::SetFlagByName("gta4_sony_intensity",
+                             dualsense_strength == 1 ? "0.3" : dualsense_strength == 3 ? "1.0" : "0.6");
+    rex::cvar::SetFlagByName("mgr_fps_counter", fps_counter == 2 ? "detailed" : fps_counter == 1 ? "simple" : "off");
+    REXLOG_INFO("Metal Gear Rising: Revengeance menu: anti-aliasing {}, texture filtering {}, the GPU's second lane {}, "
+                "{} button icons, DualSense features {} (strength {}), FPS counter {}",
+                fxaa ? "FXAA" : "off", kFilterNames[filter], lane ? "on" : "off", ps_buttons ? "PlayStation" : "Xbox",
+                dualsense ? "on" : "off", dualsense_strength, fps_counter);
   }
 };
 
@@ -246,7 +270,9 @@ const char* const kPageNames[kPages] = {"HOME", "CONTENT", "SAVES", "SETTINGS", 
 
 // The settings page's rows, in its order (a new option: a row here, its line
 // in SettingsLines and its change in ChangeSetting).
-enum SettingsRow { kAntiAliasing, kFiltering, kLane, kMusic, kSettingsRows };
+enum SettingsRow {
+  kButtons, kDualSense, kDualSenseStrength, kAntiAliasing, kFiltering, kLane, kFpsCounter, kMusic, kSettingsRows
+};
 
 class MenuDialog final : public rex::ui::ImGuiDialog {
  public:
@@ -483,6 +509,24 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     char music[16];
     std::snprintf(music, sizeof(music), "%d%%", settings_.music);
     std::vector<SettingLine> lines(kSettingsRows);
+    lines[kButtons] = {"CONTROLLER", "BUTTON ICONS", settings_.ps_buttons ? "PLAYSTATION" : "XBOX", true,
+                       "The buttons the game shows in its prompts, menus and tutorials: cross, circle, square and "
+                       "triangle, L1 R1 L2 R2, OPTIONS - or the Xbox 360's own. The controller pictures on the "
+                       "controls pages stay the Xbox 360's."};
+    lines[kDualSense] = {"CONTROLLER", "DUALSENSE FEATURES", settings_.dualsense ? "ON" : "OFF", true,
+                         "The light bar follows Raiden's health: blue when he's well, to red as it runs low, a flash "
+                         "when he's hit, white as Zandatsu repairs him, deep red in Ripper Mode. L2 (Blade Mode) "
+                         "pushes back while there's fuel for it, R2 (Ninja Run) gives a little, and hits rumble "
+                         "harder."};
+    static constexpr const char* kStrengths[] = {"", "LOW", "MEDIUM", "HIGH"};
+    lines[kDualSenseStrength] = {"CONTROLLER", "FEEDBACK STRENGTH", kStrengths[settings_.dualsense_strength],
+                                 settings_.dualsense,
+                                 "How hard the adaptive triggers push back and how strong the added rumble is."};
+    static constexpr const char* kCounters[] = {"OFF", "SIMPLE", "DETAILED"};
+    lines[kFpsCounter] = {"GRAPHICS", "FPS COUNTER", kCounters[settings_.fps_counter], true,
+                          "A frame rate counter at the left edge of the screen while you play. SIMPLE shows frames a "
+                          "second and the frame time; DETAILED also the slowest frames and a graph of the last two "
+                          "seconds."};
     lines[kAntiAliasing] = {"GRAPHICS", "ANTI-ALIASING", settings_.fxaa ? "FXAA" : "OFF", true,
                             "FXAA smooths the jagged edges of the picture as it goes to the screen. It costs the PS5's "
                             "GPU a little and blurs fine detail slightly."};
@@ -501,6 +545,21 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
   void ChangeSetting(int row, int step, bool cross) {
     const bool flip = step || cross;
     switch (row) {
+      case kButtons:
+        if (flip) settings_.ps_buttons = !settings_.ps_buttons;
+        break;
+      case kDualSense:
+        if (flip) settings_.dualsense = !settings_.dualsense;
+        break;
+      case kDualSenseStrength:
+        if (!settings_.dualsense) break;
+        if (cross) settings_.dualsense_strength = settings_.dualsense_strength % 3 + 1;
+        settings_.dualsense_strength = std::clamp(settings_.dualsense_strength + step, 1, 3);
+        break;
+      case kFpsCounter:
+        if (cross) settings_.fps_counter = (settings_.fps_counter + 1) % 3;
+        settings_.fps_counter = std::clamp(settings_.fps_counter + step, 0, 2);
+        break;
       case kAntiAliasing:
         if (flip) settings_.fxaa = !settings_.fxaa;
         break;
@@ -1002,7 +1061,7 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
         dl->AddRectFilled(ImVec2(x0, yy - 3 * u), ImVec2(x0 + w * settings_.music / 100.0f, yy + 3 * u),
                           P(sel ? kRed : kGrey));
       }
-      y += fs + 16 * u;
+      y += fs + 10 * u;
     }
     // the focused row's help, at the right
     const float px = 1060 * u + page_dx_, pw = 720 * u;

@@ -17,7 +17,7 @@ if(PS5)
     # own sound mixer for its song.
     set(GTA4_PS5_SRC "${REXSDK_DIR}/gta4-recomp/src/ps5")
     set(MGR_PS5_FONTS "${REXSDK_DIR}/../../ps5/assets/fonts")
-    list(APPEND MGR_APP_SOURCES src/ps5/mgr_menu.cpp src/ps5/mgr_install.cpp src/ps5/mgr_trophies.cpp src/ps5/mgr_trophies_game.cpp
+    list(APPEND MGR_APP_SOURCES src/ps5/mgr_menu.cpp src/ps5/mgr_install.cpp src/ps5/mgr_trophies.cpp src/ps5/mgr_trophies_game.cpp src/ps5/mgr_game_overlay.cpp
          "${GTA4_PS5_SRC}/game/sound.cpp" "${GTA4_PS5_SRC}/hub/hub_sfx.cpp")
     set_source_files_properties(src/ps5/mgr_menu.cpp PROPERTIES
         COMPILE_DEFINITIONS "MGRPS5_FONTS_DIR=\"${MGR_PS5_FONTS}\"")
