@@ -9,8 +9,8 @@ endif
 
 ELF ?= mgr-ps5-installer.elf
 
-SRC := installer.cpp store_disc.cpp store_stfs.cpp
-HDR := store_disc.hpp store_stfs.hpp store_zip.hpp include/rex/platform.h include/gta4_install_io.h \
+SRC := installer.cpp store_disc.cpp store_stfs.cpp store_unzip.cpp
+HDR := store_disc.hpp store_stfs.hpp store_unzip.hpp store_zip.hpp include/rex/platform.h include/gta4_install_io.h \
        include/rex/filesystem/direct_io.h
 CXXFLAGS := -std=c++20 -O2 -Wall -Werror -Iinclude
 

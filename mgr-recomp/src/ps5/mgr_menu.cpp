@@ -296,11 +296,6 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     for (const char* name : {"background.jpg", "background.png"})
       if (!background_) background_ = Load(hub / name);
     logo_ = Load(hub / "logo.png");
-    {
-      std::error_code ec;
-      for (const auto& e : fs::directory_iterator(app / "movie_hd", ec))
-        if (e.path().extension() == ".usm" && e.file_size(ec) > 0) ++hd_movies_;
-    }
     std::error_code ec;
     // (an install the app was closed during: not to be taken for a finished one)
     fs::remove_all(app / "game.installing", ec);
@@ -348,6 +343,11 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
   void Refresh() {
     installed_ = install::Check(app_);
     sources_ = install::Scan(app_);
+    // (the HD cutscenes in movie_hd/: installed from install/ too)
+    hd_movies_ = 0;
+    std::error_code ec;
+    for (const auto& e : fs::directory_iterator(app_ / "movie_hd", ec))
+      if (e.path().extension() == ".usm" && e.file_size(ec) > 0) ++hd_movies_;
   }
 
   // The content rows: the game, Title Update 4, the DLC (in install::Remove's order).
@@ -534,9 +534,10 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     lines[kHdMovies] = {"GAMEPLAY", "HD CUTSCENES", hd_movies_ ? std::string(hd) : std::string("NOT INSTALLED"),
                         hd_movies_ > 0,
                         "The cutscenes remastered to 1080p at 60 frames a second (MGRR FULLHD 60FPS CUTSCENE "
-                        "UPSCALE on Nexus Mods), in place of the Xbox 360's 576p at 30. To install them, put the "
-                        "pack's .usm files in PPSA48080/movie_hd/ (the number is how many are there); "
-                        "a cutscene with none there plays the disc's."};
+                        "UPSCALE on Nexus Mods), in place of the Xbox 360's 576p at 30. Put its two zips, as "
+                        "downloaded, in PPSA48080/install/: they install by themselves and are deleted after "
+                        "(about 21 GB). Or put the .usm files in PPSA48080/movie_hd/. The number is how many "
+                        "are installed; a cutscene with none plays the disc's."};
     lines[kLightBar] = {"CONTROLLER", "LIGHT BAR", settings_.lightbar_effects ? "HEALTH + EFFECTS" : "HEALTH ONLY",
                         settings_.dualsense,
                         "HEALTH + EFFECTS: the light bar follows Raiden's health and also flashes for hits and "

@@ -34,10 +34,16 @@ HD cutscenes (optional)
 -----------------------
 The cutscenes remastered to 1080p at 60 fps: "MGRR FULLHD 60FPS CUTSCENE
 UPSCALE" on Nexus Mods (nexusmods.com/metalgearrisingrevengeance/mods/505).
-Download "All Cutscenes pt1" and "pt2", extract the .usm files from both on a
-PC (about 21 GB; rename "ev9020 .usm" to "ev9020.usm") and put them in
-PPSA48080/movie_hd/. Its "event" files aren't needed: the app makes that
-change itself. A cutscene with no file there plays the disc's.
+Download "All Cutscenes pt1" and "pt2" and either:
+ - put the two zips, as downloaded, in PPSA48080/install/. The app unpacks
+   them into PPSA48080/movie_hd/ when it opens (about ten minutes) and deletes
+   them afterwards. It needs about 15 GB free besides the zips while it works,
+   and the movies take about 21 GB in the end.
+ - or extract the .usm files on a PC and put them in PPSA48080/movie_hd/
+   (rename "ev9020 .usm" to "ev9020.usm").
+The "event" download isn't needed: the app makes that change itself (and
+deletes it if it's in install/). A cutscene with no file there plays the
+disc's.
 
 The menu
 --------

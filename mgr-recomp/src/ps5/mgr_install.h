@@ -13,12 +13,16 @@
 //    the name the Xbox 360 gives it, whatever the file is called.
 //  - Saves: Xbox 360 save packages, into <app>/saves the way the runtime keeps
 //    them; and the app's own backups (install/backups/...), restored.
+//  - The HD cutscenes: the PC version's 60 fps packs (zips of .usm movies, as
+//    downloaded) or their movies by themselves, into <app>/movie_hd; the
+//    zips deleted once their movies are in, and the packs' event files (not
+//    needed: the app makes their one change) with them.
 //
 // Everything is found from what it is (an image's file system, a package's
 // header), never from its name. An install is written next to its place and
 // moved in when complete, so an interrupted one leaves nothing half done; the
-// source is deleted once it's in. Archives (.7z, .rar, .zip) are listed to be
-// extracted on a PC first.
+// source is deleted once it's in. Other archives (.7z, .rar, .zip) are listed
+// to be extracted on a PC first.
 #pragma once
 
 #include <rex/platform.h>
@@ -40,6 +44,7 @@ enum class Kind {
   kGameFolder,   // a folder with default.xex
   kUpdate,       // a title update (Title Update 4's is checked when it's installed)
   kDlc,
+  kCutscenes,    // the HD cutscenes: a pack (a zip of .usm movies) or a movie by itself
   kSave,         // an Xbox 360 save package
   kBackup,       // one of this app's backups
   kArchive,      // .7z / .rar / .zip: extract on a PC

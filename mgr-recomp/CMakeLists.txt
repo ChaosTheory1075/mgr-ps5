@@ -17,12 +17,20 @@ if(PS5)
     # own sound mixer for its song.
     set(GTA4_PS5_SRC "${REXSDK_DIR}/gta4-recomp/src/ps5")
     set(MGR_PS5_FONTS "${REXSDK_DIR}/../../ps5/assets/fonts")
+    # This repository's installer payload (ps5/payload/installer: the framework sits in the
+    # build's workspace beside it, this folder copied into the framework)
+    set(MGR_PS5_PAYLOAD_SRC "${REXSDK_DIR}/../../../ps5/payload/installer")
+    if(NOT EXISTS "${MGR_PS5_PAYLOAD_SRC}/store_unzip.cpp")
+        message(FATAL_ERROR "the installer payload's source isn't at ${MGR_PS5_PAYLOAD_SRC}")
+    endif()
     list(APPEND MGR_APP_SOURCES src/ps5/mgr_menu.cpp src/ps5/mgr_install.cpp src/ps5/mgr_trophies.cpp src/ps5/mgr_trophies_game.cpp src/ps5/mgr_game_overlay.cpp
-         "${GTA4_PS5_SRC}/game/sound.cpp" "${GTA4_PS5_SRC}/hub/hub_sfx.cpp")
+         "${GTA4_PS5_SRC}/game/sound.cpp" "${GTA4_PS5_SRC}/hub/hub_sfx.cpp"
+         # (the installer payload's zip reader: the HD cutscenes' packs, found and unpacked in the app too)
+         "${MGR_PS5_PAYLOAD_SRC}/store_unzip.cpp")
     set_source_files_properties(src/ps5/mgr_menu.cpp PROPERTIES
         COMPILE_DEFINITIONS "MGRPS5_FONTS_DIR=\"${MGR_PS5_FONTS}\"")
     add_executable(mgr ${MGR_APP_SOURCES} ${GENERATED_SOURCES})
-    target_include_directories(mgr PRIVATE "${GTA4_PS5_SRC}")
+    target_include_directories(mgr PRIVATE "${GTA4_PS5_SRC}" "${MGR_PS5_PAYLOAD_SRC}")
     # The recompiled game's own files, as gta4-recomp marks GTA IV's.
     set(MGR_PS5_GUEST_SOURCES ${GENERATED_SOURCES})
     list(FILTER MGR_PS5_GUEST_SOURCES INCLUDE REGEX "mgr_recomp\\.[0-9]+\\.cpp$")

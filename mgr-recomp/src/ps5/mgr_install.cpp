@@ -34,6 +34,9 @@
 // everything waits on it.
 #include "../install/gta4_install_io.h"
 
+// The installer payload's zip reader (ps5/payload/installer): the HD cutscenes' packs.
+#include "store_unzip.hpp"
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -153,6 +156,45 @@ std::string Gb(uint64_t bytes) {
   char s[32];
   std::snprintf(s, sizeof(s), "%.1f GB", double(bytes) / (1024.0 * 1024.0 * 1024.0));
   return s;
+}
+
+// ---- the HD cutscenes ----
+
+constexpr const char* kMoviesFolder = "movie_hd";
+
+// A movie's name in movie_hd/: without folders or spaces (the 60 fps pack's "ev9020 .usm" is ev9020.usm,
+// the name the game opens).
+std::string MovieName(const std::string& name) {
+  std::string out;
+  for (char c : name.substr(name.find_last_of("/\\") + 1))
+    if (c != ' ') out += c;
+  return out;
+}
+bool IsMovieName(const std::string& name) {
+  const std::string n = Lower(MovieName(name));
+  return n.size() > 4 && n.compare(n.size() - 4, 4, ".usm") == 0;
+}
+
+// A zip's cutscene movies (.usm, the empty ones aside); none: it isn't an HD cutscene pack.
+std::vector<recomp::unzip::Entry> ZipMovies(const fs::path& zip, std::string* error = nullptr) {
+  recomp::unzip::Archive archive;
+  std::string why;
+  std::vector<recomp::unzip::Entry> movies;
+  if (!archive.open(zip.string(), why)) {
+    if (error) *error = why;
+    return movies;
+  }
+  for (const auto& e : archive.entries())
+    if (e.size && IsMovieName(e.name)) movies.push_back(e);
+  return movies;
+}
+
+// The HD cutscene packs' event files (event-505-....rar, small): not needed - the app makes the one
+// change they have (sub_8287D078, mgr_app.cpp).
+bool IsCutsceneEvents(const fs::path& file) {
+  std::error_code ec;
+  const std::string name = Lower(file.filename().string());
+  return Ext(file) == ".rar" && name.rfind("event", 0) == 0 && fs::file_size(file, ec) < (4u << 20);
 }
 
 // ---- copying out of a disc image or a package ----
@@ -643,7 +685,8 @@ Installed Check(const fs::path& app) {
 }
 
 bool Automatic(Kind kind) {
-  return kind == Kind::kGameImage || kind == Kind::kGameFolder || kind == Kind::kUpdate || kind == Kind::kDlc;
+  return kind == Kind::kGameImage || kind == Kind::kGameFolder || kind == Kind::kUpdate || kind == Kind::kDlc ||
+         kind == Kind::kCutscenes;
 }
 
 namespace {
@@ -708,6 +751,12 @@ std::vector<Source> Scan(const fs::path& app) {
     const std::string ext = Ext(p), file = p.filename().string();
     if (ext == ".iso" || ext == ".xiso") {
       out.push_back({Kind::kGameImage, p, file});
+    } else if (ext == ".usm") {
+      out.push_back({Kind::kCutscenes, p, "HD cutscene " + MovieName(file)});
+    } else if (ext == ".zip" && !ZipMovies(p).empty()) {
+      out.push_back({Kind::kCutscenes, p, "HD cutscenes: " + file});
+    } else if (IsCutsceneEvents(p)) {
+      out.push_back({Kind::kOther, p, file + "  (the HD cutscenes' event files: not needed, deleted)"});
     } else if (ext == ".7z" || ext == ".rar" || ext == ".zip" || ext == ".001" || ext == ".gz" || ext == ".tar") {
       out.push_back({Kind::kArchive, p, file});
     } else if (IsPackage(p)) {
@@ -950,6 +999,119 @@ bool Job::Install(const fs::path& app, const Source& source) {
         }
         Leftover(source.path);
         result = source.label + " is installed.";
+        return true;
+      });
+    case Kind::kCutscenes:
+      return Start("Installing the " + source.label, [this, app, source](std::string& result) {
+        std::error_code ec;
+        const fs::path movies = app / kMoviesFolder;
+        fs::create_directories(movies, ec);
+        // the packs' event files, wherever they are in install/: not needed
+        auto drop_events = [&] {
+          std::error_code e2;
+          std::vector<fs::path> events;
+          for (fs::recursive_directory_iterator it(Folder(app), e2), end; !e2 && it != end; it.increment(e2)) {
+            std::error_code e3;
+            if (it->is_regular_file(e3) && IsCutsceneEvents(it->path())) events.push_back(it->path());
+          }
+          for (const fs::path& e : events) RemoveSource(e);
+        };
+        if (Ext(source.path) == ".usm") {
+          // a movie by itself: moved in (the same drive)
+          const fs::path dest = movies / MovieName(source.path.filename().string());
+          fs::remove(dest, ec);
+          ec.clear();
+          fs::rename(source.path, dest, ec);
+          if (ec) {
+            result = "Couldn't move the " + source.label + " into movie_hd/ (" + ec.message() + ").";
+            return false;
+          }
+          drop_events();
+          result = "Installed the " + source.label + ".";
+          return true;
+        }
+        std::string error;
+        const auto entries = ZipMovies(source.path, &error);
+        if (entries.empty()) {
+          result = source.path.filename().string() + " couldn't be read" + (error.empty() ? "" : " (" + error + ")") + ".";
+          return false;
+        }
+        uint64_t size = 0;
+        for (const auto& e : entries) size += e.size;
+        total_ = size;
+        if (!EnoughSpace(app, size, result)) return false;
+        const std::string zip = InsideApp(app, source.path);
+        const Ran ran = zip.empty() ? Ran::kUnavailable
+                                    : ByPayload(app,
+                                                std::string("kind=zip\nstaging=") + kStagingRel + "\nsource=" + zip +
+                                                    "\ntarget=" + kMoviesFolder + "\nneeded=" +
+                                                    std::to_string(size + (256ull << 20)) + "\n",
+                                                done_, total_, error);
+        if (ran == Ran::kFailed) {
+          fs::remove_all(Staging(app), ec);
+          result = "Installing the " + source.label + " failed: " + error;
+          return false;
+        }
+        int count = 0;
+        if (ran == Ran::kDone) {
+          // the payload's movies moved in, one by one (movie_hd/ may have others already)
+          const fs::path staged = Staging(app) / kMoviesFolder;
+          for (fs::directory_iterator it(staged, ec), end; !ec && it != end; it.increment(ec)) {
+            std::error_code e2;
+            const fs::path dest = movies / it->path().filename();
+            fs::remove(dest, e2);
+            e2.clear();
+            fs::rename(it->path(), dest, e2);
+            if (e2) {
+              result = "Couldn't move the HD cutscenes into movie_hd/ (" + e2.message() + ").";
+              fs::remove_all(Staging(app), e2);
+              return false;
+            }
+            ++count;
+          }
+          fs::remove_all(Staging(app), ec);
+        } else {
+          // no payload loader: unpacked here (slowly: the PS5 slows an app's writing down)
+          recomp::unzip::Archive archive;
+          if (!archive.open(source.path.string(), error)) {
+            result = source.path.filename().string() + " couldn't be read (" + error + ").";
+            return false;
+          }
+          gta4::install::io::AlignedBuffer gather;
+          for (const auto& e : entries) {
+            const fs::path dest = movies / MovieName(e.name), tmp = dest.string() + ".installing";
+            gta4::install::io::OutFile out;
+            if (!out.Open(tmp, &gather, e.size)) {
+              result = "Couldn't write movie_hd/" + MovieName(e.name) + " (is the drive full?).";
+              return false;
+            }
+            bool wrote = true;
+            const bool read = archive.read(
+                e,
+                [&](const uint8_t* data, size_t n) {
+                  wrote = out.Write(data, n);
+                  done_.fetch_add(n, std::memory_order_relaxed);
+                  return wrote;
+                },
+                error);
+            const bool closed = out.Close();
+            if (!read || !wrote || !closed) {
+              fs::remove(tmp, ec);
+              result = "Installing the " + source.label + " failed: " +
+                       (!wrote || !closed ? "couldn't write movie_hd/" + MovieName(e.name) + " (is the drive full?)"
+                                          : error);
+              return false;
+            }
+            fs::remove(dest, ec);
+            ec.clear();
+            fs::rename(tmp, dest, ec);
+            ++count;
+          }
+        }
+        RemoveSource(source.path);
+        drop_events();
+        result = "Installed " + std::to_string(count) + " HD cutscenes from " + source.path.filename().string() +
+                 " (and deleted it).";
         return true;
       });
     case Kind::kSave:

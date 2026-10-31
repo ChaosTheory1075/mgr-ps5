@@ -32,6 +32,10 @@
  *     target=<where in the staging folder: dlc/<name>, update>
  *     needed=...
  *   copies the package's files into <staging>/<target>.
+ *   A zip of movies (the HD cutscenes' packs):
+ *     kind=zip
+ *     staging=...  source=install/<the zip>  target=movie_hd  needed=...
+ *   unpacks its .usm files (Deflate64 too: store_unzip.cpp) into <staging>/<target>.
  * The app then checks them and moves them into place.
  *
  * It takes the job by renaming job.txt to job.taken (the app takes back a job nobody took by
@@ -46,6 +50,7 @@
 
 #include "store_disc.hpp"
 #include "store_stfs.hpp"
+#include "store_unzip.hpp"
 #include "store_zip.hpp"
 
 #include "gta4_install_io.h" /* GTA IV for PS5's install reading and writing (include/) */
@@ -1245,6 +1250,129 @@ int package(const std::string &job)
     log_line("done in %.0f s", now_s() - g.t0);
     return 0;
 }
+
+/* ---- A zip of movies (the HD cutscenes' packs) ------------------------------------------
+ *     kind=zip
+ *     staging=UserData/mgr/.install-staging
+ *     source=install/<the zip>
+ *     target=<where in the staging folder: movie_hd>
+ *     needed=<bytes the install needs free>
+ * Its .usm files (the empty ones aside) go into <staging>/<target>, by their names without
+ * folders or spaces ("ev9020 .usm" is ev9020.usm), each checked against the zip's CRC-32. */
+int unzip_movies(const std::string &job)
+{
+    const std::string staging_rel = field(job, "staging"), source_rel = field(job, "source"), name = field(job, "target");
+    const std::uint64_t needed = std::strtoull(field(job, "needed").c_str(), nullptr, 10);
+    if (staging_rel != kStagingRel || !recomp::zip::safe_name(source_rel) || !recomp::zip::safe_name(name))
+        return fail("The install job is damaged. Start the install again.");
+    const std::string staging = g_app + "/" + staging_rel, target = staging + "/" + name;
+    const std::string source = g_app + "/" + source_rel;
+    drive_of(g_app);
+    log_line("started (pid %d): %s from %s, into %s (%s, %s free)", int(getpid()), name.c_str(), source_rel.c_str(),
+             target.c_str(), g.drive.c_str(), mb(g.free).c_str());
+
+    set_phase("reading", 1);
+    std::string error;
+    recomp::unzip::Archive zip;
+    if (!zip.open(source, error))
+        return fail(leaf(source) + ": " + error + ".");
+    struct Movie
+    {
+        const recomp::unzip::Entry *entry;
+        std::string out;
+    };
+    std::vector<Movie> movies;
+    std::uint64_t total = 0;
+    for (const recomp::unzip::Entry &e : zip.entries())
+    {
+        std::string out;
+        for (char c : leaf(e.name))
+            if (c != ' ')
+                out += c;
+        if (!e.size || out.size() < 5 || lower(out.substr(out.size() - 4)) != ".usm" || !recomp::zip::safe_name(out))
+            continue;
+        movies.push_back({&e, out});
+        total += e.size;
+    }
+    if (movies.empty())
+        return fail(leaf(source) + " has no cutscene movies (.usm) in it.");
+    g.copy_total = total;
+
+    if (g_cancel.load())
+        return fail("Stopped.");
+    set_phase("clearing", 1);
+    {
+        std::uint64_t removed = 0;
+        if (!remove_tree(staging, removed, error))
+            return fail("The files of an earlier install couldn't be removed (" + error + ").");
+    }
+    recomp::zip::make_dirs(target);
+    {
+        const std::string mark = staging + "/.token";
+        const int fd = ::open(mark.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        const bool ok = fd >= 0 && write_all(fd, reinterpret_cast<const std::uint8_t *>(g.token.data()), g.token.size());
+        if (fd >= 0)
+            ::close(fd);
+        if (!ok)
+            return fail("Couldn't write in the app's folder. Is the drive full?");
+    }
+    drive_of(g_app);
+    if (needed && g.free && g.free < needed)
+        return fail("There isn't enough free space. It needs about " + mb(needed) + " and the drive has " + mb(g.free) +
+                        " free.",
+                    staging);
+
+    const double t1 = now_s();
+    set_phase("copying", 1);
+    log_line("unpacking %zu movies, %s, from %s", movies.size(), mb(total).c_str(), leaf(source).c_str());
+    for (const Movie &m : movies)
+    {
+        const std::string dst = target + "/" + m.out;
+        const int fd = ::open(dst.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        if (fd < 0)
+            return fail("Couldn't create " + name + "/" + m.out + ".", staging);
+        io::SetCurrent(dst, m.entry->size);
+        bool wrote = true;
+        const bool read = zip.read(
+            *m.entry,
+            [&](const std::uint8_t *data, std::size_t n) {
+                if (g_cancel.load())
+                    return false;
+                const std::uint64_t t0 = io::detail::NowNs();
+                wrote = write_all(fd, data, n);
+                io::GetStats().write_ns += io::detail::NowNs() - t0;
+                if (!wrote)
+                    return false;
+                io::GetStats().write_bytes += n;
+                g.copy_done += n;
+                return true;
+            },
+            error);
+        const bool closed = ::close(fd) == 0;
+        if (g_cancel.load())
+            return fail("Stopped.", staging);
+        if (!wrote || !closed)
+            return fail("Writing " + name + "/" + m.out + " failed. Is the drive full?", staging);
+        if (!read)
+            return fail(leaf(source) + ": " + error + ".", staging);
+    }
+    zip.close();
+    const double copy_s = now_s() - t1;
+    log_line("unpacked %s in %.1f s (%.0f MB/s)", mb(g.copy_done).c_str(), copy_s,
+             copy_s > 0 ? double(g.copy_done) / 1048576.0 / copy_s : 0.0);
+
+    set_phase("syncing", 1);
+    sync();
+    if (g_cancel.load())
+        return fail("Stopped.", staging);
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        g.phase = "done";
+    }
+    write_status();
+    log_line("done in %.0f s", now_s() - g.t0);
+    return 0;
+}
 } // namespace
 
 int main()
@@ -1286,7 +1414,7 @@ int main()
     write_status();
     std::thread status(status_main);
     const std::string kind = field(job, "kind");
-    const int rc = kind == "package" ? package(job) : install(job);
+    const int rc = kind == "package" ? package(job) : kind == "zip" ? unzip_movies(job) : install(job);
     g_quit = true;
     status.join();
     write_status();
