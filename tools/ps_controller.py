@@ -12,7 +12,9 @@ a patch is drawn over the guest texture on the console (hd_textures.cpp,
 "PTCH"), (255, 0, 255, 0) keeping the guest's texels. The HUD's Ninja Run tag
 (ui_hud.dtt hud.wtb texture 0, "RT") becomes "R2" the same way.
 
-Everything is drawn here; nothing of the game's is used.
+Everything is drawn here; nothing of the game's is used. The pad's outline
+and the places of its parts were measured from a 3D scan of a DualSense
+(FRONT_OUTLINE, TOP_OUTLINE and the numbers in draw_pad).
 """
 import math
 import struct
@@ -63,6 +65,37 @@ TEAL = Palette(outline=(64, 160, 176, 255), detail=(240, 240, 240, 255), fill=(1
                button=(208, 208, 208, 255))
 
 
+# The DualSense, measured from a 3D scan of one (an orthographic render 1400
+# pixels across 170 mm, the pad's middle at x 701): its outline from the front
+# and from its top edge, and where its parts are, in that render's pixels.
+FRONT_OUTLINE = [
+    (184, 383), (160, 430), (136, 485), (116, 540), (97, 603), (79, 675), (62, 757), (46, 869), (41, 931), (40,
+    1001), (44, 1059), (50, 1102), (55, 1124), (61, 1142), (68, 1156), (85, 1175), (100, 1187), (116, 1196), (134,
+    1201), (212, 1232), (223, 1231), (230, 1225), (248, 1195), (266, 1152), (295, 1074), (334, 956), (352, 913),
+    (358, 904), (379, 885), (396, 876), (412, 872), (446, 872), (535, 879), (629, 880), (867, 879), (956, 872),
+    (990, 872), (1003, 875), (1013, 879), (1031, 891), (1044, 904), (1055, 923), (1076, 979), (1107, 1074), (1136,
+    1152), (1159, 1205), (1176, 1229), (1182, 1232), (1190, 1232), (1268, 1201), (1286, 1196), (1311, 1180), (1332,
+    1159), (1341, 1142), (1352, 1102), (1358, 1059), (1362, 1001), (1362, 953), (1358, 889), (1350, 819), (1340,
+    757), (1311, 625), (1286, 540), (1266, 485), (1242, 430), (1218, 383), (1209, 373), (1196, 365), (1189, 354),
+    (1180, 346), (1167, 339), (1138, 329), (1102, 321), (1071, 317), (1034, 318), (1020, 325), (999, 328), (979,
+    339), (965, 338), (953, 328), (936, 323), (856, 317), (754, 313), (614, 314), (460, 324), (449, 328), (437,
+    338), (423, 339), (403, 328), (382, 325), (368, 318), (331, 317), (284, 324), (235, 339), (218, 349), (213,
+    354), (209, 362), (193, 373)
+]
+TOP_OUTLINE = [
+    (40, 650), (41, 683), (48, 715), (60, 746), (76, 774), (1326, 774), (1337, 756), (1351, 724), (1359, 695),
+    (1362, 674), (1360, 633), (1350, 594), (1333, 563), (1308, 535), (1279, 517), (1250, 508), (1228, 505), (1208,
+    505), (1179, 508), (1159, 492), (1144, 465), (1132, 452), (1117, 441), (1098, 436), (1071, 437), (1051, 446),
+    (1043, 452), (1029, 470), (1021, 495), (986, 525), (973, 534), (958, 540), (941, 544), (887, 548), (515, 548),
+    (461, 544), (444, 540), (429, 534), (388, 502), (381, 495), (377, 479), (370, 465), (364, 457), (351, 446),
+    (327, 436), (298, 437), (285, 441), (270, 452), (258, 465), (243, 492), (223, 508), (194, 505), (174, 505),
+    (152, 508), (123, 517), (94, 535), (69, 563), (54, 589), (46, 613)
+]
+
+FRONT_BOX = (40, 313, 1362, 1232)  # the front outline's bounds
+TOP_BOX = (40, 436, 1362, 774)  # the top's (cut at the face's edge)
+
+
 def draw_pad(font_path, size, scale, layout, pal):
     """The pad, drawn on a transparent canvas of the texture's size times `scale`."""
     K = scale * SS
@@ -73,16 +106,25 @@ def draw_pad(font_path, size, scale, layout, pal):
     dc = ImageDraw.Draw(cut)
     s = layout.scale
 
-    def P(pt):
-        return (pt[0] * K, pt[1] * K)
+    # the scan's pixels -> the reference's coordinates (the Xbox pad's front within x 2-316, y 130-356, its top
+    # within x 36-282, y 2-92) -> this canvas
+    kf = min(314 / (FRONT_BOX[2] - FRONT_BOX[0]), 226 / (FRONT_BOX[3] - FRONT_BOX[1]))
+    ff = (2 + (314 - (FRONT_BOX[2] - FRONT_BOX[0]) * kf) / 2, 130 + (226 - (FRONT_BOX[3] - FRONT_BOX[1]) * kf) / 2)
+    kt = 246 / (TOP_BOX[2] - TOP_BOX[0])
+    ft = (36, 2 + (90 - (TOP_BOX[3] - TOP_BOX[1]) * kt) / 2)
 
     def B(x, y):
-        return P(layout.body(x, y))
+        rx, ry = layout.body(ff[0] + (x - FRONT_BOX[0]) * kf, ff[1] + (y - FRONT_BOX[1]) * kf)
+        return rx * K, ry * K
 
     def T(x, y):
-        return P(layout.top(x, y))
+        rx, ry = layout.top(ft[0] + (x - TOP_BOX[0]) * kt, ft[1] + (y - TOP_BOX[1]) * kt)
+        return rx * K, ry * K
 
-    def lw(px):
+    def rb(r):  # a length in the front's pixels -> the canvas
+        return r * kf * s * K
+
+    def lw(px):  # a line width in the reference's units
         return max(1, int(px * s * K))
 
     def font(px):
@@ -97,107 +139,87 @@ def draw_pad(font_path, size, scale, layout, pal):
     def circle(c, r, **kw):
         d.ellipse([c[0] - r, c[1] - r, c[0] + r, c[1] + r], **kw)
 
-    def smooth(path):
-        """A closed path of cubic Bezier segments: (start, control 1, control 2, end), ... -> points."""
+    def curve(points, steps=16):
+        """A smooth line through the points (Catmull-Rom)."""
         out = []
-        for p0, c1, c2, p1 in path:
-            for i in range(24):
-                t = i / 24
-                m = 1 - t
-                out.append((m ** 3 * p0[0] + 3 * m * m * t * c1[0] + 3 * m * t * t * c2[0] + t ** 3 * p1[0],
-                            m ** 3 * p0[1] + 3 * m * m * t * c1[1] + 3 * m * t * t * c2[1] + t ** 3 * p1[1]))
+        pts = [points[0]] + list(points) + [points[-1]]
+        for i in range(1, len(pts) - 2):
+            p0, p1, p2, p3 = pts[i - 1], pts[i], pts[i + 1], pts[i + 2]
+            for j in range(steps):
+                t = j / steps
+                out.append(tuple(0.5 * ((2 * p1[k]) + (-p0[k] + p2[k]) * t + (2 * p0[k] - 5 * p1[k] + 4 * p2[k] - p3[k]) * t * t +
+                                        (-p0[k] + 3 * p1[k] - 3 * p2[k] + p3[k]) * t ** 3) for k in (0, 1)))
+        out.append(points[-1])
         return out
 
-    def mirrored(half):
-        """The right half (top middle to bottom middle, clockwise) and its mirror: the whole outline."""
-        return half + [(2 * CX - x, y) for x, y in reversed(half)][1:-1]
+    def rounded(points, closed=True, passes=3):
+        """Corners cut (Chaikin): the scan's outline, smooth."""
+        for _ in range(passes):
+            out = []
+            n = len(points) if closed else len(points) - 1
+            for i in range(n):
+                p, q = points[i], points[(i + 1) % len(points)]
+                out += [(0.75 * p[0] + 0.25 * q[0], 0.75 * p[1] + 0.25 * q[1]),
+                        (0.25 * p[0] + 0.75 * q[0], 0.25 * p[1] + 0.75 * q[1])]
+            points = out if closed else [points[0]] + out + [points[-1]]
+        # and the scan's small wobbles averaged out
+        n, k = len(points), 6
+        idx = (lambda i: i % n) if closed else (lambda i: min(max(i, 0), n - 1))
+        return [(sum(points[idx(i + j)][0] for j in range(-k, k + 1)) / (2 * k + 1),
+                 sum(points[idx(i + j)][1] for j in range(-k, k + 1)) / (2 * k + 1)) for i in range(n)]
 
-    def inset(outline, by):
-        """The outline moved `by` inwards (along each point's normal)."""
-        n = len(outline)
-        out = []
-        for i, (x, y) in enumerate(outline):
-            ax, ay = outline[i - 1]
-            bx, by_ = outline[(i + 1) % n]
-            tx, ty = bx - ax, by_ - ay
-            ln = math.hypot(tx, ty) or 1
-            out.append((x - ty / ln * by, y + tx / ln * by))
-        return out
+    def both(points):
+        """The points and their mirror image (about the pad's middle)."""
+        return points, [(2 * MID - x, y) for x, y in points]
 
-    # ---- the front (in the reference's coordinates: the Xbox pad's within x 2-316, y 130-356) ----
-    CX = 158.5
-    half = smooth([
-        ((CX, 142), (190, 142), (212, 140), (230, 135)),  # the top edge, along the touchpad
-        ((230, 135), (252, 129), (278, 129), (290, 142)),  # up over the shoulder
-        ((290, 142), (300, 154), (302, 180), (305, 210)),  # the grip's outside, widening as it goes down
-        ((305, 210), (309, 252), (318, 300), (312, 336)),
-        ((312, 336), (306, 358), (276, 360), (264, 340)),  # round the grip's end
-        ((264, 340), (252, 318), (240, 290), (222, 274)),  # the grip's inside
-        ((222, 274), (204, 260), (180, 258), (CX, 258)),  # the bridge between the grips
-    ])
-    outline = mirrored(half)
-    d.polygon([B(x, y) for x, y in outline], outline=pal.outline, width=lw(3))
-    d.line([B(x, y) for x, y in inset(outline, 5)] + [B(*inset(outline, 5)[0])], fill=pal.detail, width=lw(1.1),
-           joint="curve")
-    # the faceplate's edge: the dark middle (touchpad down to the bridge) between the white grips
-    face = smooth([
-        ((CX, 254), (186, 254), (210, 252), (218, 236)),
-        ((218, 236), (224, 222), (214, 210), (214, 196)),
-        ((214, 196), (214, 172), (226, 150), (236, 139)),
-    ])
-    for side in (1, -1):
-        d.line([B(CX + (x - CX) * side, y) for x, y in face], fill=pal.detail, width=lw(1.1), joint="curve")
-    # the touchpad, CREATE and OPTIONS at its top corners, the PS and mute buttons below it
-    tp = smooth([
-        ((CX, 143), (186, 143), (204, 142), (208, 146)),
-        ((208, 146), (212, 152), (210, 178), (204, 192)),
-        ((204, 192), (198, 202), (180, 204), (CX, 204)),
-    ])
-    d.polygon([B(x, y) for x, y in mirrored(tp)], outline=pal.detail, width=lw(1.4))
-    for x0, ang in ((101, 60), (216, -60)):
-        cx, cy = B(x0, 150)
-        a = math.radians(ang)
-        hx, hy = math.cos(a) * 5 * s * K, math.sin(a) * 5 * s * K
-        d.line([(cx - hx, cy - hy), (cx + hx, cy + hy)], fill=pal.fill, width=lw(5))
-        d.line([(cx - hx, cy - hy), (cx + hx, cy + hy)], fill=pal.detail, width=lw(2.4))
-    f = font(5.5)
-    for x0, label in ((101, "CREATE"), (216, "OPTIONS")):
-        cx, cy = B(x0, 162)
-        bb = d.textbbox((0, 0), label, font=f)
-        d.text((cx - (bb[2] - bb[0]) / 2 - bb[0], cy - (bb[3] - bb[1]) / 2 - bb[1]), label, font=f, fill=pal.detail)
-    ps = B(CX, 218)
-    circle(ps, 7 * s * K, fill=pal.button)
-    text_cut(ps, "PS", 6.5)
-    mx, my = B(CX, 232)
-    d.rounded_rectangle([mx - 7 * s * K, my - 2.2 * s * K, mx + 7 * s * K, my + 2.2 * s * K], radius=int(2 * s * K),
-                        fill=pal.fill)
-    # the speaker's holes between the sticks
+    MID = 701
+
+    # ---- the front ----
+    body = [B(x, y) for x, y in rounded(FRONT_OUTLINE)]
+    d.line(body + body[:2], fill=pal.outline, width=lw(3), joint="curve")
+    # the faceplate's seams: from the touchpad's side round the stick and down the grip's inside
+    for seam in both([(452, 330), (458, 470), (462, 560), (420, 615), (372, 690), (330, 790), (292, 900), (252, 1010),
+                      (222, 1110), (206, 1205)]):
+        d.line([B(x, y) for x, y in curve(seam)], fill=pal.detail, width=lw(1.1), joint="curve")
+    # the touchpad
+    tp = [(MID, 330), (900, 330), (946, 334), (952, 420), (944, 530), (920, 566), (MID, 572)]
+    tp = tp + [(2 * MID - x, y) for x, y in reversed(tp)][1:-1]
+    d.polygon([B(x, y) for x, y in rounded(tp, passes=4)], outline=pal.detail, width=lw(1.4))
+    # CREATE and OPTIONS beside the touchpad's top corners
+    for cx in (388, 2 * MID - 388):
+        c = B(cx, 396)
+        d.rounded_rectangle([c[0] - rb(13), c[1] - rb(26), c[0] + rb(13), c[1] + rb(26)], radius=int(rb(12)) - 1,
+                            fill=pal.fill, outline=pal.detail, width=lw(0.9))
+    # the sticks: the wells round them, their caps
+    for cx in (495, 2 * MID - 495):
+        circle(B(cx, 690), rb(104), outline=pal.detail, width=lw(1.1))
+        circle(B(cx, 683), rb(76), fill=pal.fill)
+        circle(B(cx, 683), rb(50), outline=pal.detail, width=lw(1.1))
+    # the PS button, the speaker's holes above it, the mute button below
+    ps = B(MID, 690)
+    circle(ps, rb(24), fill=pal.button)
+    text_cut(ps, "PS", 5.5)
     for row in range(3):
-        for col in range(-3, 4):
-            if abs(col) == 3 and row != 1:
+        for col in range(-4, 5):
+            if abs(col) == 4 and row != 1:
                 continue
-            circle(B(CX + col * 4.5, 240 + row * 4), 0.9 * s * K, fill=pal.detail)
-    # the sticks, low and either side of the middle
-    for c in ((116, 238), (201, 238)):
-        cc = B(*c)
-        circle(cc, 20 * s * K, outline=pal.detail, width=lw(1.4))
-        circle(cc, 15 * s * K, fill=pal.fill)
-        circle(cc, 9.5 * s * K, outline=pal.detail, width=lw(1.1))
-    # the d-pad, upper left: four separate pointed keys
-    dx, dy = B(72, 182)
+            circle(B(MID + col * 13, 610 + row * 12), rb(3.2), fill=pal.detail)
+    m = B(MID, 772)
+    d.rounded_rectangle([m[0] - rb(30), m[1] - rb(8), m[0] + rb(30), m[1] + rb(8)], radius=int(rb(8)) - 1, fill=pal.fill)
+    # the d-pad: four keys, rounded, narrowing to the middle
+    dx, dy = 300, 525
     for ang in (0, 90, 180, 270):
         a = math.radians(ang)
         ux, uy = math.cos(a), math.sin(a)
         vx, vy = -uy, ux
-        key = []
-        for along, side in ((5, 0), (10.5, -6.5), (22, -6.5), (23.5, -5), (23.5, 5), (22, 6.5), (10.5, 6.5)):
-            key.append((dx + (ux * along + vx * side) * s * K, dy + (uy * along + vy * side) * s * K))
-        d.polygon(key, fill=pal.fill, outline=pal.detail, width=lw(1))
+        key = [(14, 0), (34, -30), (88, -34), (112, -26), (112, 26), (88, 34), (34, 30)]
+        pts = curve([(dx + ux * al + vx * sd, dy + uy * al + vy * sd) for al, sd in key + key[:1]], 6)
+        d.polygon([B(x, y) for x, y in pts], fill=pal.fill, outline=pal.detail, width=lw(1))
     # the face buttons: triangle (Y), square (X), circle (B), cross (A)
-    for (x, y), kind in (((245.5, 161), "triangle"), ((224.5, 182), "square"), ((266.5, 182), "circle"),
-                         ((245.5, 203), "cross")):
+    for (x, y), kind in (((1105, 435), "triangle"), ((1012, 525), "square"), ((1198, 525), "circle"),
+                         ((1105, 615), "cross")):
         c = B(x, y)
-        r = 10.5 * s * K
+        r = rb(44)
         circle(c, r, fill=pal.button)
         sym = r * 0.5
         w = lw(2.2)
@@ -214,39 +236,29 @@ def draw_pad(font_path, size, scale, layout, pal):
             dc.line([c[0] - sym * 0.8, c[1] - sym * 0.8, c[0] + sym * 0.8, c[1] + sym * 0.8], fill=255, width=w)
             dc.line([c[0] - sym * 0.8, c[1] + sym * 0.8, c[0] + sym * 0.8, c[1] - sym * 0.8], fill=255, width=w)
 
-    # ---- the top (the Xbox pad's within x 36-282, y 2-92): the pad seen from its top edge ----
-    # the top edge: wide wings at the shoulders, a dip in the middle where the touchpad is
-    top_half = smooth([
-        ((CX, 56), (190, 56), (212, 52), (226, 46)),  # the top edge across the touchpad
-        ((226, 46), (246, 40), (268, 40), (279, 50)),  # up to the shoulder
-        ((279, 50), (288, 58), (288, 76), (276, 84)),  # round the wing's end
-        ((276, 84), (258, 92), (226, 90), (200, 86)),  # the front, the grips' tops
-        ((200, 86), (184, 84), (172, 84), (CX, 84)),
-    ])
-    top_outline = [(x, y) for x, y in mirrored(top_half)]
-    d.polygon([T(x, y) for x, y in top_outline], outline=pal.outline, width=lw(3))
-    # the light bar strip and the USB-C port in the middle
-    d.line([T(128, 70), T(189, 70)], fill=pal.fill, width=lw(2.5))
-    d.rounded_rectangle([*T(151, 74), *T(166, 79)], radius=int(2.5 * s * K), outline=pal.detail, width=lw(1))
+    # ---- the top: the pad from its top edge, the triggers standing behind the bumpers ----
+    # (open where it was cut at the face's edge)
+    i = max(range(len(TOP_OUTLINE)), key=lambda i: TOP_OUTLINE[i][1] < TOP_BOX[3] - 2 and TOP_OUTLINE[i - 1][1] >= TOP_BOX[3] - 2)
+    top = [p for p in TOP_OUTLINE[i:] + TOP_OUTLINE[:i] if p[1] < TOP_BOX[3] - 2]
+    d.line([T(x, y) for x, y in rounded(top, closed=False)], fill=pal.outline, width=lw(3), joint="curve")
     for side in (1, -1):
         def X(x):
-            return CX + (x - CX) * side
-        # the trigger (L2/R2): curved, standing up behind the bumper
-        trig = smooth([
-            ((X(222), 46), (X(222), 26), (X(230), 6), (X(246), 4)),
-            ((X(246), 4), (X(262), 3), (X(268), 20), (X(268), 42)),
-        ])
-        d.polygon([T(x, y) for x, y in trig + [(X(268), 46)]], fill=pal.fill)
-        text_cut(T(X(245), 26), "R2" if side == 1 else "L2", 11)
-        # the bumper (L1/R1): a flat key along the top edge
-        bump = smooth([
-            ((X(214), 51), (X(232), 44), (X(262), 41), (X(276), 50)),
-            ((X(276), 50), (X(281), 54), (X(280), 61), (X(272), 62)),
-            ((X(272), 62), (X(252), 60), (X(230), 61), (X(214), 63)),
-            ((X(214), 63), (X(208), 61), (X(208), 53), (X(214), 51)),
-        ])
+            return MID + (x - MID) * side
+        trig = curve([(X(214), 590), (X(212), 500), (X(236), 446), (X(300), 432), (X(364), 446), (X(386), 500),
+                      (X(384), 590)], 8)
+        d.polygon([T(x, y) for x, y in trig], fill=pal.fill)
+        text_cut(T(X(300), 520), "L2" if side == 1 else "R2", 10)
+        bump = curve([(X(214), 598), (X(300), 592), (X(386), 598), (X(390), 660), (X(372), 712), (X(300), 720),
+                      (X(228), 712), (X(210), 660), (X(214), 598)], 8)
         d.polygon([T(x, y) for x, y in bump], fill=pal.fill, outline=pal.detail, width=lw(1))
-        text_cut(T(X(246), 55.5), "R1" if side == 1 else "L1", 9)
+        text_cut(T(X(300), 657), "L1" if side == 1 else "R1", 10)
+    # the USB-C port, the touchpad's front edge
+    u = T(MID, 647)
+    rt = kt * s * K
+    d.rounded_rectangle([u[0] - 30 * rt, u[1] - 8 * rt, u[0] + 30 * rt, u[1] + 8 * rt], radius=int(8 * rt) - 1,
+                        outline=pal.detail, width=lw(1))
+    d.line([T(x, y) for x, y in curve([(452, 708), (MID, 700), (950, 708)])], fill=pal.detail, width=lw(1.1),
+           joint="curve")
 
     # the cut-outs (symbols and labels) through what's under them
     alpha = img.getchannel("A")
