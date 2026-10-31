@@ -2,12 +2,12 @@
 
 The pause menu's, the options' and the manual's controls pages (ui_core.dtt
 core.wtb texture 0, ui_option.dtt option.wtb, ui_manual.dtt manual.wtb, all
-512x512 DXT5) draw an Xbox 360 pad from above and from the front, the game's
-callouts pointing at its buttons. Each patch here clears the pad's two areas
-and draws a PlayStation pad there - its buttons where the Xbox one's were, so
-the callouts still point at them: triangle, square, circle and cross where Y,
-X, B and A are, L1 L2 R1 R2 on the shoulders, CREATE and OPTIONS where BACK
-and START are. The rest of each texture (the pages' frames) is the game's own:
+512x512 DXT5) draw an Xbox 360 pad from above and from the front (just the
+pad: no callouts in the textures). Each patch here clears the pad's two areas
+and draws a DualSense there, laid out as one is: the d-pad upper left, the
+sticks low either side of the middle, CREATE and OPTIONS at the touchpad's top
+corners, triangle, square, circle and cross where Y, X, B and A are, L1 L2 R1
+R2 on the shoulders. The rest of each texture (the pages' frames) is the game's own:
 a patch is drawn over the guest texture on the console (hd_textures.cpp,
 "PTCH"), (255, 0, 255, 0) keeping the guest's texels. The HUD's Ninja Run tag
 (ui_hud.dtt hud.wtb texture 0, "RT") becomes "R2" the same way.
@@ -97,54 +97,104 @@ def draw_pad(font_path, size, scale, layout, pal):
     def circle(c, r, **kw):
         d.ellipse([c[0] - r, c[1] - r, c[0] + r, c[1] + r], **kw)
 
-    # ---- the front: the body ----
-    # (a DualSense-like outline: a wide top, two grips; in the reference's coordinates)
-    pts = []
-    for t in range(0, 181):
-        a = math.radians(t)
-        pts.append((158.5 + 128 * math.cos(math.pi - a), 162 - 26 * math.sin(a)))
-    right = [(286, 162), (300, 190), (312, 250), (316, 312), (306, 345), (282, 355), (262, 344), (244, 316),
-             (224, 290), (200, 278), (158.5, 276)]
-    left = [(2 * 158.5 - x, y) for x, y in reversed(right)]
-    outline = pts + right[1:] + left[1:-1]
-    body = [B(x, y) for x, y in outline]
-    d.polygon(body, outline=pal.outline, width=lw(3))
-    inner = [B(158.5 + (x - 158.5) * 0.95, 258 + (y - 258) * 0.93) for x, y in outline]
-    d.line(inner + [inner[0]], fill=pal.detail, width=lw(1.2), joint="curve")
-    # the touchpad, the light bar under it, CREATE and OPTIONS beside it, the PS button below
-    d.rounded_rectangle([*B(122, 146), *B(195, 196)], radius=int(8 * s * K), outline=pal.detail, width=lw(1.5))
-    for x0, label in ((127, "CREATE"), (191, "OPTIONS")):
-        cx, cy = B(x0, 184)
-        r = 5 * s * K
-        d.rounded_rectangle([cx - r * 0.7, cy - r * 1.3, cx + r * 0.7, cy + r * 1.3], radius=int(r * 0.6),
-                            fill=pal.fill, outline=pal.detail, width=lw(1))
+    def smooth(path):
+        """A closed path of cubic Bezier segments: (start, control 1, control 2, end), ... -> points."""
+        out = []
+        for p0, c1, c2, p1 in path:
+            for i in range(24):
+                t = i / 24
+                m = 1 - t
+                out.append((m ** 3 * p0[0] + 3 * m * m * t * c1[0] + 3 * m * t * t * c2[0] + t ** 3 * p1[0],
+                            m ** 3 * p0[1] + 3 * m * m * t * c1[1] + 3 * m * t * t * c2[1] + t ** 3 * p1[1]))
+        return out
+
+    def mirrored(half):
+        """The right half (top middle to bottom middle, clockwise) and its mirror: the whole outline."""
+        return half + [(2 * CX - x, y) for x, y in reversed(half)][1:-1]
+
+    def inset(outline, by):
+        """The outline moved `by` inwards (along each point's normal)."""
+        n = len(outline)
+        out = []
+        for i, (x, y) in enumerate(outline):
+            ax, ay = outline[i - 1]
+            bx, by_ = outline[(i + 1) % n]
+            tx, ty = bx - ax, by_ - ay
+            ln = math.hypot(tx, ty) or 1
+            out.append((x - ty / ln * by, y + tx / ln * by))
+        return out
+
+    # ---- the front (in the reference's coordinates: the Xbox pad's within x 2-316, y 130-356) ----
+    CX = 158.5
+    half = smooth([
+        ((CX, 142), (190, 142), (212, 140), (230, 135)),  # the top edge, along the touchpad
+        ((230, 135), (252, 129), (278, 129), (290, 142)),  # up over the shoulder
+        ((290, 142), (300, 154), (302, 180), (305, 210)),  # the grip's outside, widening as it goes down
+        ((305, 210), (309, 252), (318, 300), (312, 336)),
+        ((312, 336), (306, 358), (276, 360), (264, 340)),  # round the grip's end
+        ((264, 340), (252, 318), (240, 290), (222, 274)),  # the grip's inside
+        ((222, 274), (204, 260), (180, 258), (CX, 258)),  # the bridge between the grips
+    ])
+    outline = mirrored(half)
+    d.polygon([B(x, y) for x, y in outline], outline=pal.outline, width=lw(3))
+    d.line([B(x, y) for x, y in inset(outline, 5)] + [B(*inset(outline, 5)[0])], fill=pal.detail, width=lw(1.1),
+           joint="curve")
+    # the faceplate's edge: the dark middle (touchpad down to the bridge) between the white grips
+    face = smooth([
+        ((CX, 254), (186, 254), (210, 252), (218, 236)),
+        ((218, 236), (224, 222), (214, 210), (214, 196)),
+        ((214, 196), (214, 172), (226, 150), (236, 139)),
+    ])
+    for side in (1, -1):
+        d.line([B(CX + (x - CX) * side, y) for x, y in face], fill=pal.detail, width=lw(1.1), joint="curve")
+    # the touchpad, CREATE and OPTIONS at its top corners, the PS and mute buttons below it
+    tp = smooth([
+        ((CX, 143), (186, 143), (204, 142), (208, 146)),
+        ((208, 146), (212, 152), (210, 178), (204, 192)),
+        ((204, 192), (198, 202), (180, 204), (CX, 204)),
+    ])
+    d.polygon([B(x, y) for x, y in mirrored(tp)], outline=pal.detail, width=lw(1.4))
+    for x0, ang in ((101, 60), (216, -60)):
+        cx, cy = B(x0, 150)
+        a = math.radians(ang)
+        hx, hy = math.cos(a) * 5 * s * K, math.sin(a) * 5 * s * K
+        d.line([(cx - hx, cy - hy), (cx + hx, cy + hy)], fill=pal.fill, width=lw(5))
+        d.line([(cx - hx, cy - hy), (cx + hx, cy + hy)], fill=pal.detail, width=lw(2.4))
     f = font(5.5)
-    for x0, label in ((127, "CREATE"), (191, "OPTIONS")):
-        cx, cy = B(x0, 172)
+    for x0, label in ((101, "CREATE"), (216, "OPTIONS")):
+        cx, cy = B(x0, 162)
         bb = d.textbbox((0, 0), label, font=f)
         d.text((cx - (bb[2] - bb[0]) / 2 - bb[0], cy - (bb[3] - bb[1]) / 2 - bb[1]), label, font=f, fill=pal.detail)
-    ps = B(158.5, 206)
-    circle(ps, 6 * s * K, fill=pal.fill, outline=pal.detail, width=lw(1))
-    text_cut(ps, "PS", 6)
-    # the sticks: their rings and caps (where the Xbox pad's were)
-    for c in ((70, 180.5), (203, 232)):
+    ps = B(CX, 218)
+    circle(ps, 7 * s * K, fill=pal.button)
+    text_cut(ps, "PS", 6.5)
+    mx, my = B(CX, 232)
+    d.rounded_rectangle([mx - 7 * s * K, my - 2.2 * s * K, mx + 7 * s * K, my + 2.2 * s * K], radius=int(2 * s * K),
+                        fill=pal.fill)
+    # the speaker's holes between the sticks
+    for row in range(3):
+        for col in range(-3, 4):
+            if abs(col) == 3 and row != 1:
+                continue
+            circle(B(CX + col * 4.5, 240 + row * 4), 0.9 * s * K, fill=pal.detail)
+    # the sticks, low and either side of the middle
+    for c in ((116, 238), (201, 238)):
         cc = B(*c)
-        circle(cc, 21 * s * K, outline=pal.detail, width=lw(1.5))
-        circle(cc, 15.5 * s * K, fill=pal.fill)
-        circle(cc, 9 * s * K, outline=pal.detail, width=lw(1))
-    # the d-pad: four keys pointing at its middle
-    dx, dy = B(112.5, 232.5)
+        circle(cc, 20 * s * K, outline=pal.detail, width=lw(1.4))
+        circle(cc, 15 * s * K, fill=pal.fill)
+        circle(cc, 9.5 * s * K, outline=pal.detail, width=lw(1.1))
+    # the d-pad, upper left: four separate pointed keys
+    dx, dy = B(72, 182)
     for ang in (0, 90, 180, 270):
         a = math.radians(ang)
         ux, uy = math.cos(a), math.sin(a)
         vx, vy = -uy, ux
         key = []
-        for along, side in ((4, 0), (9, -7), (24, -7), (24, 7), (9, 7)):
+        for along, side in ((5, 0), (10.5, -6.5), (22, -6.5), (23.5, -5), (23.5, 5), (22, 6.5), (10.5, 6.5)):
             key.append((dx + (ux * along + vx * side) * s * K, dy + (uy * along + vy * side) * s * K))
         d.polygon(key, fill=pal.fill, outline=pal.detail, width=lw(1))
-    circle((dx, dy), 26 * s * K, outline=pal.detail, width=lw(1.2))
     # the face buttons: triangle (Y), square (X), circle (B), cross (A)
-    for (x, y), kind in (((245.5, 160.5), "triangle"), ((224.5, 182), "square"), ((267, 182), "circle"),
+    for (x, y), kind in (((245.5, 161), "triangle"), ((224.5, 182), "square"), ((266.5, 182), "circle"),
                          ((245.5, 203), "cross")):
         c = B(x, y)
         r = 10.5 * s * K
@@ -164,17 +214,39 @@ def draw_pad(font_path, size, scale, layout, pal):
             dc.line([c[0] - sym * 0.8, c[1] - sym * 0.8, c[0] + sym * 0.8, c[1] + sym * 0.8], fill=255, width=w)
             dc.line([c[0] - sym * 0.8, c[1] + sym * 0.8, c[0] + sym * 0.8, c[1] - sym * 0.8], fill=255, width=w)
 
-    # ---- the top: the shoulders (L2 L1 / R1 R2) and the pad's top edge ----
-    top = [T(40, 88), T(40, 62), T(60, 40), T(258, 40), T(278, 62), T(278, 88)]
-    d.line(top, fill=pal.outline, width=lw(3), joint="curve")
-    d.line([T(130, 62), T(188, 62)], fill=pal.fill, width=lw(3))  # the light bar
-    d.rounded_rectangle([*T(150, 70), *T(168, 76)], radius=int(2 * s * K), outline=pal.detail, width=lw(1))
-    for x0, x1, label in ((63, 92, "L2"), (226, 255, "R2")):
-        d.rounded_rectangle([*T(x0, 4), *T(x1, 48)], radius=int(12 * s * K), fill=pal.fill)
-        text_cut(T((x0 + x1) / 2, 30), label, 11)
-    for x0, x1, label in ((40, 88, "L1"), (230, 278, "R1")):
-        d.rounded_rectangle([*T(x0, 51), *T(x1, 68)], radius=int(7 * s * K), fill=pal.fill)
-        text_cut(T((x0 + x1) / 2, 59.5), label, 11)
+    # ---- the top (the Xbox pad's within x 36-282, y 2-92): the pad seen from its top edge ----
+    # the top edge: wide wings at the shoulders, a dip in the middle where the touchpad is
+    top_half = smooth([
+        ((CX, 56), (190, 56), (212, 52), (226, 46)),  # the top edge across the touchpad
+        ((226, 46), (246, 40), (268, 40), (279, 50)),  # up to the shoulder
+        ((279, 50), (288, 58), (288, 76), (276, 84)),  # round the wing's end
+        ((276, 84), (258, 92), (226, 90), (200, 86)),  # the front, the grips' tops
+        ((200, 86), (184, 84), (172, 84), (CX, 84)),
+    ])
+    top_outline = [(x, y) for x, y in mirrored(top_half)]
+    d.polygon([T(x, y) for x, y in top_outline], outline=pal.outline, width=lw(3))
+    # the light bar strip and the USB-C port in the middle
+    d.line([T(128, 70), T(189, 70)], fill=pal.fill, width=lw(2.5))
+    d.rounded_rectangle([*T(151, 74), *T(166, 79)], radius=int(2.5 * s * K), outline=pal.detail, width=lw(1))
+    for side in (1, -1):
+        def X(x):
+            return CX + (x - CX) * side
+        # the trigger (L2/R2): curved, standing up behind the bumper
+        trig = smooth([
+            ((X(222), 46), (X(222), 26), (X(230), 6), (X(246), 4)),
+            ((X(246), 4), (X(262), 3), (X(268), 20), (X(268), 42)),
+        ])
+        d.polygon([T(x, y) for x, y in trig + [(X(268), 46)]], fill=pal.fill)
+        text_cut(T(X(245), 26), "R2" if side == 1 else "L2", 11)
+        # the bumper (L1/R1): a flat key along the top edge
+        bump = smooth([
+            ((X(214), 51), (X(232), 44), (X(262), 41), (X(276), 50)),
+            ((X(276), 50), (X(281), 54), (X(280), 61), (X(272), 62)),
+            ((X(272), 62), (X(252), 60), (X(230), 61), (X(214), 63)),
+            ((X(214), 63), (X(208), 61), (X(208), 53), (X(214), 51)),
+        ])
+        d.polygon([T(x, y) for x, y in bump], fill=pal.fill, outline=pal.detail, width=lw(1))
+        text_cut(T(X(246), 55.5), "R1" if side == 1 else "L1", 9)
 
     # the cut-outs (symbols and labels) through what's under them
     alpha = img.getchannel("A")
