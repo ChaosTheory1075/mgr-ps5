@@ -86,6 +86,61 @@ def main():
          "    REXKRNL_IMPORT_RESULT(\"NtCreateFile\", \"{:#x} handle={:#x}\", result, handle);\n",
          "    REXKRNL_IMPORT_RESULT(\"NtCreateFile\", \"{:#x} handle={:#x}\", result, handle);\n"
          "    REXKRNL_INFO(\"[NtCreateFile] {} -> handle {:#x}\", target_path, handle);  // [mgr]\n")
+    # HD cutscenes: a cutscene movie (...\movie\evXXXX.usm, the disc's or a DLC's) is opened
+    # from moviehd:\ (the app's movie_hd/, mounted by mgr_app.cpp) when that folder has it - the
+    # PC version's movies remastered to 1080p at 60 fps (Nexus Mods: MGRR FULLHD 60FPS
+    # CUTSCENE UPSCALE), the same Sofdec video and ADX sound the 360's Mana plays. Empty files
+    # (the pack's placeholders) are passed over. The cut lists' PlayRate goes with them
+    # (mgr_app.cpp).
+    edit(io,
+         "#include <rex/filesystem/device.h>\n",
+         "#include <cctype>\n#include <rex/cvar.h>\n#include <rex/filesystem/device.h>\n"
+         "REXCVAR_DECLARE(bool, mgr_hd_movies);  // [mgr] (mgr_app.cpp)\n")
+    edit(io,
+         "u32 NtCreateFile_entry(mapped_u32 handle_out, u32 desired_access,\n",
+         "namespace {\n"
+         "// [mgr] moviehd:\\\\evXXXX.usm (the app's movie_hd/, mgr_app.cpp) for a cutscene movie's path\n"
+         "// (empty: not one)\n"
+         "std::string MgrHdMoviePath(const std::string& path) {\n"
+         "  if (!REXCVAR_GET(mgr_hd_movies)) return {};\n"
+         "  std::string lower(path);\n"
+         "  for (char& c : lower) c = char(std::tolower(static_cast<unsigned char>(c)));\n"
+         "  const size_t name = lower.find_last_of(\"\\\\/\");\n"
+         "  if (name == std::string::npos || name < 6 || lower.compare(name - 6, 6, \"\\\\movie\") != 0) return {};\n"
+         "  if (lower.compare(name + 1, 2, \"ev\") != 0 || lower.size() < 4 ||\n"
+         "      lower.compare(lower.size() - 4, 4, \".usm\") != 0) {\n"
+         "    return {};\n"
+         "  }\n"
+         "  return \"moviehd:\\\\\" + path.substr(name + 1);\n"
+         "}\n"
+         "}  // namespace\n"
+         "\n"
+         "u32 NtCreateFile_entry(mapped_u32 handle_out, u32 desired_access,\n")
+    edit(io,
+         "  rex::filesystem::File* vfs_file;\n"
+         "  rex::filesystem::FileAction file_action;\n"
+         "  X_STATUS result = REX_KERNEL_FS()->OpenFile(\n"
+         "      root_entry, target_path, rex::filesystem::FileDisposition((uint32_t)creation_disposition),\n"
+         "      desired_access, (create_options & CreateOptions::FILE_DIRECTORY_FILE) != 0,\n"
+         "      (create_options & CreateOptions::FILE_NON_DIRECTORY_FILE) != 0, &vfs_file, &file_action);\n",
+         "  rex::filesystem::File* vfs_file;\n"
+         "  rex::filesystem::FileAction file_action;\n"
+         "  X_STATUS result = X_STATUS_UNSUCCESSFUL;\n"
+         "  // [mgr] a cutscene movie: the HD one if it's there (see MgrHdMoviePath)\n"
+         "  if (const std::string hd = MgrHdMoviePath(target_path); !hd.empty()) {\n"
+         "    result = REX_KERNEL_FS()->OpenFile(nullptr, hd, rex::filesystem::FileDisposition::kOpen, desired_access,\n"
+         "                                       false, true, &vfs_file, &file_action);\n"
+         "    if (XSUCCEEDED(result) && (!vfs_file->entry() || !vfs_file->entry()->size())) {\n"
+         "      vfs_file->Destroy();\n"
+         "      result = X_STATUS_UNSUCCESSFUL;\n"
+         "    }\n"
+         "    REXKRNL_INFO(\"mgr: cutscene {} from {}\", target_path, XSUCCEEDED(result) ? hd : std::string(\"the disc\"));\n"
+         "  }\n"
+         "  if (!XSUCCEEDED(result))\n"
+         "  result = REX_KERNEL_FS()->OpenFile(\n"
+         "      root_entry, target_path, rex::filesystem::FileDisposition((uint32_t)creation_disposition),\n"
+         "      desired_access, (create_options & CreateOptions::FILE_DIRECTORY_FILE) != 0,\n"
+         "      (create_options & CreateOptions::FILE_NON_DIRECTORY_FILE) != 0, &vfs_file, &file_action);\n")
 
     # A guest crash's own state in the crash line: the app's
     # rex_guest_fault_report (mgr_app.cpp) writes the faulting thread's guest

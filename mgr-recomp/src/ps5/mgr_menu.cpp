@@ -154,6 +154,7 @@ struct Settings {
   int fps_counter = 0;         // 0 off, 1 simple, 2 detailed (mgr_fps_counter)
   bool lightbar_effects = true;  // the light bar's flashes and pulses (mgr_lightbar_effects)
   bool skip_intro = true;        // no logos at the start (mgr_skip_intro)
+  bool hd_movies = true;         // the cutscenes from movie_hd/ (mgr_hd_movies)
 
   static constexpr const char* kFilterNames[] = {"", "", "2X", "4X", "8X", "16X"};
 
@@ -176,6 +177,7 @@ struct Settings {
         if (k == "fps_counter") s.fps_counter = std::clamp(value, 0, 2);
         if (k == "lightbar_effects") s.lightbar_effects = value != 0;
         if (k == "skip_intro") s.skip_intro = value != 0;
+        if (k == "hd_cutscenes") s.hd_movies = value != 0;
       }
       std::fclose(f);
     }
@@ -186,9 +188,11 @@ struct Settings {
     if (std::FILE* f = std::fopen((app / "menu.ini").string().c_str(), "wb")) {
       std::fprintf(f,
                    "fxaa = %d\ntexture_filtering = %d\ngpu_lane = %d\nmenu_music = %d\nps_buttons = %d\ndualsense = %d\n"
-                   "dualsense_strength = %d\nfps_counter = %d\nlightbar_effects = %d\nskip_intro = %d\n",
+                   "dualsense_strength = %d\nfps_counter = %d\nlightbar_effects = %d\nskip_intro = %d\n"
+                   "hd_cutscenes = %d\n",
                    fxaa ? 1 : 0, filter, lane ? 1 : 0, music, ps_buttons ? 1 : 0, dualsense ? 1 : 0,
-                   dualsense_strength, fps_counter, lightbar_effects ? 1 : 0, skip_intro ? 1 : 0);
+                   dualsense_strength, fps_counter, lightbar_effects ? 1 : 0, skip_intro ? 1 : 0,
+                   hd_movies ? 1 : 0);
       std::fclose(f);
     }
   }
@@ -215,6 +219,7 @@ struct Settings {
     rex::cvar::SetFlagByName("mgr_fps_counter", fps_counter == 2 ? "detailed" : fps_counter == 1 ? "simple" : "off");
     rex::cvar::SetFlagByName("mgr_lightbar_effects", lightbar_effects ? "true" : "false");
     rex::cvar::SetFlagByName("mgr_skip_intro", skip_intro ? "true" : "false");
+    rex::cvar::SetFlagByName("mgr_hd_movies", hd_movies ? "true" : "false");
     REXLOG_INFO("Metal Gear Rising: Revengeance menu: anti-aliasing {}, texture filtering {}, the GPU's second lane {}, "
                 "{} button icons, DualSense features {} (strength {}), FPS counter {}",
                 fxaa ? "FXAA" : "off", kFilterNames[filter], lane ? "on" : "off", ps_buttons ? "PlayStation" : "Xbox",
@@ -277,7 +282,7 @@ const char* const kPageNames[kPages] = {"HOME", "CONTENT", "SAVES", "SETTINGS", 
 // The settings page's rows, in its order (a new option: a row here, its line
 // in SettingsLines and its change in ChangeSetting).
 enum SettingsRow {
-  kSkipIntro, kButtons, kDualSense, kLightBar, kDualSenseStrength, kAntiAliasing, kFiltering, kLane, kFpsCounter, kMusic,
+  kSkipIntro, kHdMovies, kButtons, kDualSense, kLightBar, kDualSenseStrength, kAntiAliasing, kFiltering, kLane, kFpsCounter, kMusic,
   kSettingsRows
 };
 
@@ -291,6 +296,11 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     for (const char* name : {"background.jpg", "background.png"})
       if (!background_) background_ = Load(hub / name);
     logo_ = Load(hub / "logo.png");
+    {
+      std::error_code ec;
+      for (const auto& e : fs::directory_iterator(app / "movie_hd", ec))
+        if (e.path().extension() == ".usm" && e.file_size(ec) > 0) ++hd_movies_;
+    }
     std::error_code ec;
     // (an install the app was closed during: not to be taken for a finished one)
     fs::remove_all(app / "game.installing", ec);
@@ -519,6 +529,14 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     lines[kSkipIntro] = {"GAMEPLAY", "SKIP INTRO", settings_.skip_intro ? "ON" : "OFF", true,
                          "Go straight to the title screen, without the Konami, Kojima Productions, PlatinumGames "
                          "and other logos at the start."};
+    char hd[48];
+    std::snprintf(hd, sizeof(hd), "%s (%d)", settings_.hd_movies ? "ON" : "OFF", hd_movies_);
+    lines[kHdMovies] = {"GAMEPLAY", "HD CUTSCENES", hd_movies_ ? std::string(hd) : std::string("NOT INSTALLED"),
+                        hd_movies_ > 0,
+                        "The cutscenes remastered to 1080p at 60 frames a second (MGRR FULLHD 60FPS CUTSCENE "
+                        "UPSCALE on Nexus Mods), in place of the Xbox 360's 576p at 30. To install them, put the "
+                        "pack's .usm files in PPSA48080/movie_hd/ (the number is how many are there); "
+                        "a cutscene with none there plays the disc's."};
     lines[kLightBar] = {"CONTROLLER", "LIGHT BAR", settings_.lightbar_effects ? "HEALTH + EFFECTS" : "HEALTH ONLY",
                         settings_.dualsense,
                         "HEALTH + EFFECTS: the light bar follows Raiden's health and also flashes for hits and "
@@ -565,6 +583,9 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
         break;
       case kSkipIntro:
         if (flip) settings_.skip_intro = !settings_.skip_intro;
+        break;
+      case kHdMovies:
+        if (flip && hd_movies_) settings_.hd_movies = !settings_.hd_movies;
         break;
       case kLightBar:
         if (flip && settings_.dualsense) settings_.lightbar_effects = !settings_.lightbar_effects;
@@ -1309,6 +1330,7 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
   fs::path app_, user_data_;
   std::function<void(MenuChoice)> play_;
   Settings settings_;
+  int hd_movies_ = 0;  // (the HD cutscenes in movie_hd/)
   Pad pad_;
   Image background_, logo_;
   gta4ps5::sound::Voice* music_ = nullptr;

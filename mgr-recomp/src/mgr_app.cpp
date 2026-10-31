@@ -5,6 +5,8 @@
 #include <system_error>
 
 #include <rex/cvar.h>
+#include <rex/filesystem/devices/host_path_device.h>
+#include <rex/filesystem/vfs.h>
 #include <rex/logging.h>
 #include <rex/memory.h>
 #include <rex/platform.h>
@@ -36,6 +38,7 @@ fs::path AppRoot(const rex::PathConfig& defaults) {
 }
 
 fs::path g_app_root;
+bool g_hd_movies = false;  // (the HD cutscenes: on, and movie_hd/ has movies: ResolvePaths)
 
 rex::PathConfig ResolvePaths(const rex::PathConfig& defaults);
 
@@ -118,6 +121,19 @@ void MgrApp::OnPostSetup() {
   // The frame rate counter and the DualSense's features (ps5/mgr_game_overlay.h).
   mgrps5::StartGameOverlay(imgui_drawer());
 #endif
+  // HD cutscenes: the app's movie_hd/ as moviehd:\ (the kernel's NtCreateFile opens a cutscene's
+  // movie from there when it has it: ci/patch_framework.py)
+  if (g_hd_movies && REX_KERNEL_STATE()) {
+    constexpr const char* kMount = "\\Device\\MgrMovieHd";
+    auto device = std::make_unique<rex::filesystem::HostPathDevice>(kMount, g_app_root / "movie_hd", true);
+    if (device->Initialize() && REX_KERNEL_FS()->RegisterDevice(std::move(device))) {
+      REX_KERNEL_FS()->RegisterSymbolicLink("moviehd:", kMount);
+      REXLOG_INFO("Metal Gear Rising: HD cutscenes from {}", (g_app_root / "movie_hd").string());
+    } else {
+      g_hd_movies = false;
+      REXLOG_ERROR("Metal Gear Rising: couldn't mount {}", (g_app_root / "movie_hd").string());
+    }
+  }
 }
 
 // The player character's constructor (Pl0000's, which Raiden's and the DLC
@@ -137,6 +153,20 @@ extern "C" void sub_822B4198(PPCContext& __restrict ctx, uint8_t* base) {
 // logos' update (sub_82BFCB68, once a frame: its "done" flag at +416) is told
 // they're done, so the title comes as soon as the loading is.
 REXCVAR_DEFINE_BOOL(mgr_skip_intro, true, "Metal Gear Rising", "Skip the logos at the start");
+
+// HD cutscenes (the app's movie_hd/, opened in their place by the kernel's
+// NtCreateFile: ci/patch_framework.py): their cut lists' PlayRate from 30 to 240,
+// as the PC version's 60 fps pack sets it in its event files - the one value it
+// changes in them. A cut list's MotionRate, PlayRate and the next value are read
+// into three bytes (sub_8287D078: the object r3, PlayRate at +1).
+REXCVAR_DEFINE_BOOL(mgr_hd_movies, true, "Metal Gear Rising",
+                    "Play the cutscenes from the app's movie_hd/ when it has them (HD, 60 fps)");
+
+extern "C" void sub_8287D078(PPCContext& __restrict ctx, uint8_t* base) {
+  const uint32_t rates = ctx.r3.u32;
+  __imp__sub_8287D078(ctx, base);
+  if (g_hd_movies && REX_LOAD_U8(rates + 1) == 30) REX_STORE_U8(rates + 1, 240);
+}
 
 extern "C" void sub_82BFCB68(PPCContext& __restrict ctx, uint8_t* base) {
   if (REXCVAR_GET(mgr_skip_intro)) {
@@ -176,6 +206,13 @@ rex::PathConfig ResolvePaths(const rex::PathConfig& defaults) {
   if (!fs::exists(paths.game_data_root / "default.xexp", ec))
     REXLOG_ERROR("Metal Gear Rising: Revengeance: no default.xexp in {} (Title Update 4's, from the menu)",
                  paths.game_data_root.string());
+  // HD cutscenes: movie_hd/'s movies (mounted in OnPostSetup; see sub_8287D078)
+  int hd_movies = 0;
+  for (const auto& e : fs::directory_iterator(root / "movie_hd", ec))
+    if (e.path().extension() == ".usm" && e.file_size(ec) > 0) ++hd_movies;
+  g_hd_movies = REXCVAR_GET(mgr_hd_movies) && hd_movies > 0;
+  REXLOG_INFO("Metal Gear Rising: Revengeance: HD cutscenes {} ({} movies in movie_hd)", g_hd_movies ? "on" : "off",
+              hd_movies);
   return paths;
 }
 

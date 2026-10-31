@@ -30,6 +30,15 @@ Install
    shows what's installed. At the end it asks whether to delete the files it
    installed from (X) or keep them (O).
 
+HD cutscenes (optional)
+-----------------------
+The cutscenes remastered to 1080p at 60 fps: "MGRR FULLHD 60FPS CUTSCENE
+UPSCALE" on Nexus Mods (nexusmods.com/metalgearrisingrevengeance/mods/505).
+Download "All Cutscenes pt1" and "pt2", extract the .usm files from both on a
+PC (about 21 GB; rename "ev9020 .usm" to "ev9020.usm") and put them in
+PPSA48080/movie_hd/. Its "event" files aren't needed: the app makes that
+change itself. A cutscene with no file there plays the disc's.
+
 The menu
 --------
 HOME      PLAY; an install's progress; what's missing and where it goes.
@@ -37,10 +46,18 @@ CONTENT   the game, Title Update 4 and the DLC: installed or not, X installs
           one from install/, triangle (twice) uninstalls it.
 SAVES     BACK UP SAVES (to install/backups/), IMPORT an Xbox 360 save
           package from install/, RESTORE one of the backups.
-SETTINGS  ANTI-ALIASING     off or FXAA.
+SETTINGS  SKIP INTRO         no logos at the start (on).
+          HD CUTSCENES      the HD cutscenes, when installed (see below).
+          BUTTON ICONS      PlayStation (cross, circle, square, triangle, L1...)
+                            or the Xbox 360's.
+          DUALSENSE         the light bar follows Raiden's health, adaptive
+                            triggers on L2 (Blade Mode) and R2 (Ninja Run),
+                            stronger rumble; LIGHT BAR and FEEDBACK STRENGTH.
+          ANTI-ALIASING     off or FXAA.
           TEXTURE FILTERING 2x to 16x anisotropic.
           GPU HELPER        a second graphics thread (on); turn it off if
                             something draws wrong.
+          FPS COUNTER       off, simple or detailed.
           MENU MUSIC        the menu song's level.
 TROPHIES  every achievement, earned ones first, with their dates (filled in
           once the game has been started once).
