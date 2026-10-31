@@ -121,6 +121,8 @@ struct HdReplacer {
   // report counters: loads seen, not replaceable (by reason), hashed, matched
   uint64_t seen = 0, skip_kind = 0, skip_swizzle = 0, skip_size = 0, skip_dynamic = 0, hashed = 0, matched = 0,
            misses_logged = 0;
+  // what's been logged: each hash's miss or match, each texture's skip (by address and reason)
+  std::unordered_set<uint64_t> logged;
 };
 
 namespace {
@@ -608,6 +610,7 @@ std::shared_ptr<HdReplacement> VulkanTextureCache::HdUpload(uint64_t hash, HdDds
 void VulkanTextureCache::HdAfterLoad(VulkanTexture& texture, bool load_base) {
   if (!load_base) return;
   mgr_perf::Scope perf(mgr_perf::kHd);
+  const uint64_t pending = texture.hd_pending;
   texture.hd_pending = 0;
   HdReplacer* hd = Hd();
   if (!hd) {
@@ -631,8 +634,20 @@ void VulkanTextureCache::HdAfterLoad(VulkanTexture& texture, bool load_base) {
     default:
       replaceable = false;
   }
+  // (a texture's first skip for each reason, for those of 64x64 and up)
+  auto log_skip = [&](uint32_t reason, const char* why) {
+    if (key.GetWidth() < 64 || key.GetHeight() < 64 || hd->logged.size() >= 6000 ||
+        !hd->logged.insert(uint64_t(1) << 63 | uint64_t(key.base_page) << 8 | reason).second) {
+      return;
+    }
+    REXGPU_INFO("HD textures: {} at {:08X}: format {} {}x{} dimension {} depth {} tiled {} signed {} swizzle {:03X}",
+                why, uint32_t(key.base_page) << 12, uint32_t(key.format), key.GetWidth(), key.GetHeight(),
+                uint32_t(key.dimension), key.GetDepthOrArraySize(), uint32_t(key.tiled), uint32_t(key.signed_separate),
+                GetHostFormatSwizzle(key));
+  };
   if (!replaceable || GetHostFormatSwizzle(key) != xenos::XE_GPU_TEXTURE_SWIZZLE_RGBA) {
     ++(replaceable ? hd->skip_swizzle : hd->skip_kind);
+    log_skip(replaceable ? 1 : 0, replaceable ? "not replaced (swizzle)" : "not replaced (kind)");
     texture.hd_replacement.reset();
     return;
   }
@@ -640,12 +655,15 @@ void VulkanTextureCache::HdAfterLoad(VulkanTexture& texture, bool load_base) {
   const uint32_t address = key.base_page << 12;
   if (!size || uint64_t(address) + size > SharedMemory::kBufferSize) {
     ++hd->skip_size;
+    log_skip(2, "not replaced (size)");
     texture.hd_replacement.reset();
     return;
   }
   // Textures the game rewrites every frame or so (render targets, video,
   // dynamic maps) are never in the pack: past a few quick reloads in a row
-  // they aren't hashed (that was ~2.5 ms a frame in gameplay).
+  // they aren't hashed (that was ~2.5 ms a frame in gameplay) - unless their
+  // data's start is as it was when last hashed (reloaded for a write nearby:
+  // they keep what they have), or as at the last load (it's settled: hashed).
   const uint64_t submission = command_processor_.GetCurrentSubmission();
   if (texture.hd_last_load && submission - texture.hd_last_load <= 30) {
     if (texture.hd_fast_reloads < 255) ++texture.hd_fast_reloads;
@@ -653,27 +671,38 @@ void VulkanTextureCache::HdAfterLoad(VulkanTexture& texture, bool load_base) {
     texture.hd_fast_reloads = 0;
   }
   texture.hd_last_load = submission;
-  if (texture.hd_fast_reloads >= 4) {
-    ++hd->skip_dynamic;
-    texture.hd_replacement.reset();
-    return;
-  }
   const auto* data = REX_KERNEL_MEMORY()->TranslatePhysical<const uint8_t*>(address);
+  const uint64_t head = XXH3_64bits(data, std::min<uint32_t>(size, 4096));
+  const bool settled = head == texture.hd_seen_head;
+  texture.hd_seen_head = head;
+  if (texture.hd_fast_reloads >= 4) {
+    if (texture.hd_head && head == texture.hd_head) {
+      texture.hd_pending = pending;
+      return;
+    }
+    if (!settled) {
+      ++hd->skip_dynamic;
+      log_skip(3, "not replaced (rewritten often)");
+      texture.hd_replacement.reset();
+      return;
+    }
+  }
   // (the converter, tools/mgr_texture_pack.py, names the files by the same hash)
   const uint64_t seed = uint64_t(key.format) | uint64_t(key.GetWidth()) << 8 | uint64_t(key.GetHeight()) << 24 |
                         uint64_t(key.tiled) << 40;
   const uint64_t hash = XXH3_64bits_withSeed(data, size, seed);
   ++hd->hashed;
+  texture.hd_head = head;
   if (texture.hd_replacement && texture.hd_replacement->hash == hash) return;
   if (!hd->available.count(hash)) {
-    // (the first misses of 32x32 and up, to compare with tools/mgr_texture_pack.py)
-    if (hd->misses_logged < 300 && key.GetWidth() >= 32 && key.GetHeight() >= 32) {
+    // (each hash's first miss, of 32x32 and up, to compare with tools/mgr_texture_pack.py)
+    if (hd->logged.size() < 6000 && key.GetWidth() >= 32 && key.GetHeight() >= 32 && hd->logged.insert(hash).second) {
       ++hd->misses_logged;
       REXGPU_INFO("HD textures: miss {:016x} format {} {}x{} tiled {} pitch {} packed {} mips {} base {:08X} size {:X} "
                   "head {:016x}",
                   hash, uint32_t(key.format), key.GetWidth(), key.GetHeight(), uint32_t(key.tiled),
                   uint32_t(key.pitch) << 5, uint32_t(key.packed_mips), uint32_t(key.mip_max_level), address, size,
-                  XXH3_64bits(data, std::min<uint32_t>(size, 4096)));
+                  head);
     } else if (REXCVAR_GET(hd_textures_log_misses))
       REXGPU_INFO("HD textures: miss {:016x} format {} {}x{} tiled {}", hash, uint32_t(key.format), key.GetWidth(),
                   key.GetHeight(), uint32_t(key.tiled));
@@ -681,6 +710,10 @@ void VulkanTextureCache::HdAfterLoad(VulkanTexture& texture, bool load_base) {
     return;
   }
   ++hd->matched;
+  if (hd->logged.insert(hash).second) {
+    REXGPU_INFO("HD textures: match {:016x} format {} {}x{} at {:08X}", hash, uint32_t(key.format), key.GetWidth(),
+                key.GetHeight(), address);
+  }
   if (!hd->loaded.count(hash) && !hd->pending.count(hash) && !hd->failed.count(hash) && size <= (8u << 20)) {
     // (for a patch: the guest's texture as it is now; the reader takes it)
     HdGuest guest;

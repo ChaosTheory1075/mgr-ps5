@@ -244,7 +244,7 @@ void GameOverlay::OnDraw(ImGuiIO& io) {
   const float w = simple ? 196 : 264, pad = 12, line_h = 19;
   const float graph_h = simple ? 0 : 48;
   const float h = simple ? pad + 36 + pad - 4 : pad + 36 + 20 + float(info.size()) * line_h + 10 + graph_h + pad;
-  const float x = 12, y = (size.y / s - h) * 0.5f;
+  const float x = 12, y = 12;
   dl->AddRectFilled(P(x, y), P(x + w, y + h), IM_COL32(0, 0, 0, 170), 8 * s);
   char big[16], unit[] = "FPS", ms[32], small[96];
   if (fps_ > 0) {

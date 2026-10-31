@@ -2,7 +2,9 @@
 #include "mgr_app.h"
 
 #include <cstdio>
+#include <mutex>
 #include <system_error>
+#include <unordered_set>
 
 #include <rex/cvar.h>
 #include <rex/filesystem/devices/host_path_device.h>
@@ -168,6 +170,75 @@ extern "C" void sub_8287D078(PPCContext& __restrict ctx, uint8_t* base) {
   if (g_hd_movies && REX_LOAD_U8(rates + 1) == 30) REX_STORE_U8(rates + 1, 240);
 }
 
+// A cutscene movie's playback memory. The movie object's start (sub_828CA630:
+// the object r3, its CRI Mana player at +32, the memory at +40) sizes it from
+// the movie's header and takes it from the object's heap (+12, sub_828E4648),
+// which has room for the disc's 1024x576 movies and not for a 1080p one: the
+// movie stops before its first frame and the cutscene is skipped. What the
+// heap can't give comes from the system heap, given back before the object's
+// release (sub_828CBE28) frees +40 through the heap's header at -4.
+namespace {
+thread_local bool g_movie_starting = false;
+std::mutex g_movie_memory_mutex;
+std::unordered_set<uint32_t> g_movie_memory;
+}  // namespace
+
+extern "C" void sub_828CA630(PPCContext& __restrict ctx, uint8_t* base) {
+  const uint32_t movie = ctx.r3.u32;
+  g_movie_starting = true;
+  __imp__sub_828CA630(ctx, base);
+  g_movie_starting = false;
+  if (ctx.r3.u32 == 0) {
+    REXLOG_WARN("Metal Gear Rising: a movie didn't start (state {}, picture {}x{})", REX_LOAD_U32(movie + 8),
+                REX_LOAD_U32(movie + 64), REX_LOAD_U32(movie + 68));
+  }
+}
+
+extern "C" void sub_828E4648(PPCContext& __restrict ctx, uint8_t* base) {
+  if (!g_movie_starting) {
+    __imp__sub_828E4648(ctx, base);
+    return;
+  }
+  const uint32_t size = ctx.r4.u32;
+  __imp__sub_828E4648(ctx, base);
+  if (ctx.r3.u32) {
+    REXLOG_INFO("Metal Gear Rising: a movie's playback memory: {} KB from the game's heap", size / 1024);
+    return;
+  }
+  const uint32_t address = REX_KERNEL_MEMORY()->SystemHeapAlloc(size, 0x1000);
+  REXLOG_INFO("Metal Gear Rising: a movie's playback memory: {} KB, more than the game's heap has; {}", size / 1024,
+              address ? "from the system heap" : "the system heap hasn't room either");
+  if (address) {
+    std::lock_guard lock(g_movie_memory_mutex);
+    g_movie_memory.insert(address);
+  }
+  ctx.r3.u64 = address;
+}
+
+extern "C" void sub_828CBE28(PPCContext& __restrict ctx, uint8_t* base) {
+  const uint32_t memory = REX_LOAD_U32(ctx.r3.u32 + 40);
+  if (memory) {
+    std::unique_lock lock(g_movie_memory_mutex);
+    if (g_movie_memory.erase(memory)) {
+      lock.unlock();
+      REX_STORE_U32(ctx.r3.u32 + 40, 0);
+      REX_KERNEL_MEMORY()->SystemHeapFree(memory);
+    }
+  }
+  __imp__sub_828CBE28(ctx, base);
+}
+
+// The CRI libraries' errors (sub_82664438: the message r4, its numbers r5-r7),
+// in the log.
+extern "C" void sub_82664438(PPCContext& __restrict ctx, uint8_t* base) {
+  if (ctx.r4.u32) {
+    const char* text = reinterpret_cast<const char*>(base + ctx.r4.u32);
+    REXLOG_WARN("Metal Gear Rising: CRI: {:.200} ({} {} {})", text, int32_t(ctx.r5.u32), int32_t(ctx.r6.u32),
+                int32_t(ctx.r7.u32));
+  }
+  __imp__sub_82664438(ctx, base);
+}
+
 extern "C" void sub_82BFCB68(PPCContext& __restrict ctx, uint8_t* base) {
   if (REXCVAR_GET(mgr_skip_intro)) {
     static bool logged = false;
@@ -228,6 +299,9 @@ void MgrApp::OnPreSetup(rex::RuntimeConfig& config) {
   // instead of the draw being dropped.
   if (!rex::cvar::HasNonDefaultValue("gpu_allow_invalid_fetch_constants"))
     rex::cvar::SetLaunchFlag("gpu_allow_invalid_fetch_constants", "true");
+  // The stall sampler (SIGPROF to every thread once no frame has come for 300
+  // ms) is armed by the FPS counter's frame count, and froze Crackdown's loads.
+  if (!rex::cvar::HasNonDefaultValue("ps5_hang_reports")) rex::cvar::SetLaunchFlag("ps5_hang_reports", "false");
   REXLOG_INFO("Metal Gear Rising: Revengeance: readback_resolve={} gpu_allow_invalid_fetch_constants={} "
               "render_target_path_vulkan={}",
               rex::cvar::GetFlagByName("readback_resolve"),

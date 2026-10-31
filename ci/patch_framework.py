@@ -597,6 +597,8 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
          "    uint64_t hd_pending = 0;  // (the replacement being read in)\n"
          "    uint64_t hd_last_load = 0;  // (submission)\n"
          "    uint8_t hd_fast_reloads = 0;\n"
+         "    uint64_t hd_head = 0;  // (its data's first 4 KB when it was last hashed)\n"
+         "    uint64_t hd_seen_head = 0;  // (and at its last load)\n"
          "    friend class VulkanTextureCache;\n")
     edit(tc_h,
          "  std::pair<uint64_t, uint64_t> scaled_resolve_last_written_range_{0, 0};\n};\n",
