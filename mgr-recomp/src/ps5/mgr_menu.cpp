@@ -152,6 +152,8 @@ struct Settings {
   bool dualsense = true;       // the light bar, adaptive triggers and added rumble (mgr_game_overlay.cpp)
   int dualsense_strength = 2;  // 1..3: low, medium, high (gta4_sony_intensity)
   int fps_counter = 0;         // 0 off, 1 simple, 2 detailed (mgr_fps_counter)
+  bool lightbar_effects = true;  // the light bar's flashes and pulses (mgr_lightbar_effects)
+  bool skip_intro = true;        // no logos at the start (mgr_skip_intro)
 
   static constexpr const char* kFilterNames[] = {"", "", "2X", "4X", "8X", "16X"};
 
@@ -172,6 +174,8 @@ struct Settings {
         if (k == "dualsense") s.dualsense = value != 0;
         if (k == "dualsense_strength") s.dualsense_strength = std::clamp(value, 1, 3);
         if (k == "fps_counter") s.fps_counter = std::clamp(value, 0, 2);
+        if (k == "lightbar_effects") s.lightbar_effects = value != 0;
+        if (k == "skip_intro") s.skip_intro = value != 0;
       }
       std::fclose(f);
     }
@@ -182,9 +186,9 @@ struct Settings {
     if (std::FILE* f = std::fopen((app / "menu.ini").string().c_str(), "wb")) {
       std::fprintf(f,
                    "fxaa = %d\ntexture_filtering = %d\ngpu_lane = %d\nmenu_music = %d\nps_buttons = %d\ndualsense = %d\n"
-                   "dualsense_strength = %d\nfps_counter = %d\n",
+                   "dualsense_strength = %d\nfps_counter = %d\nlightbar_effects = %d\nskip_intro = %d\n",
                    fxaa ? 1 : 0, filter, lane ? 1 : 0, music, ps_buttons ? 1 : 0, dualsense ? 1 : 0,
-                   dualsense_strength, fps_counter);
+                   dualsense_strength, fps_counter, lightbar_effects ? 1 : 0, skip_intro ? 1 : 0);
       std::fclose(f);
     }
   }
@@ -209,6 +213,8 @@ struct Settings {
     rex::cvar::SetFlagByName("gta4_sony_intensity",
                              dualsense_strength == 1 ? "0.3" : dualsense_strength == 3 ? "1.0" : "0.6");
     rex::cvar::SetFlagByName("mgr_fps_counter", fps_counter == 2 ? "detailed" : fps_counter == 1 ? "simple" : "off");
+    rex::cvar::SetFlagByName("mgr_lightbar_effects", lightbar_effects ? "true" : "false");
+    rex::cvar::SetFlagByName("mgr_skip_intro", skip_intro ? "true" : "false");
     REXLOG_INFO("Metal Gear Rising: Revengeance menu: anti-aliasing {}, texture filtering {}, the GPU's second lane {}, "
                 "{} button icons, DualSense features {} (strength {}), FPS counter {}",
                 fxaa ? "FXAA" : "off", kFilterNames[filter], lane ? "on" : "off", ps_buttons ? "PlayStation" : "Xbox",
@@ -271,7 +277,8 @@ const char* const kPageNames[kPages] = {"HOME", "CONTENT", "SAVES", "SETTINGS", 
 // The settings page's rows, in its order (a new option: a row here, its line
 // in SettingsLines and its change in ChangeSetting).
 enum SettingsRow {
-  kButtons, kDualSense, kDualSenseStrength, kAntiAliasing, kFiltering, kLane, kFpsCounter, kMusic, kSettingsRows
+  kSkipIntro, kButtons, kDualSense, kLightBar, kDualSenseStrength, kAntiAliasing, kFiltering, kLane, kFpsCounter, kMusic,
+  kSettingsRows
 };
 
 class MenuDialog final : public rex::ui::ImGuiDialog {
@@ -509,10 +516,18 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     char music[16];
     std::snprintf(music, sizeof(music), "%d%%", settings_.music);
     std::vector<SettingLine> lines(kSettingsRows);
+    lines[kSkipIntro] = {"GAMEPLAY", "SKIP INTRO", settings_.skip_intro ? "ON" : "OFF", true,
+                         "Go straight to the title screen, without the Konami, Kojima Productions, PlatinumGames "
+                         "and other logos at the start."};
+    lines[kLightBar] = {"CONTROLLER", "LIGHT BAR", settings_.lightbar_effects ? "HEALTH + EFFECTS" : "HEALTH ONLY",
+                        settings_.dualsense,
+                        "HEALTH + EFFECTS: the light bar follows Raiden's health and also flashes for hits and "
+                        "repairs, pulses at low health and beats red in Ripper Mode. HEALTH ONLY: just the health, "
+                        "blue to red, steady."};
     lines[kButtons] = {"CONTROLLER", "BUTTON ICONS", settings_.ps_buttons ? "PLAYSTATION" : "XBOX", true,
                        "The buttons the game shows in its prompts, menus and tutorials: cross, circle, square and "
-                       "triangle, L1 R1 L2 R2, OPTIONS - or the Xbox 360's own. The controller pictures on the "
-                       "controls pages stay the Xbox 360's."};
+                       "triangle, L1 R1 L2 R2, OPTIONS, and a PlayStation pad on the controls pages - or the Xbox "
+                       "360's own."};
     lines[kDualSense] = {"CONTROLLER", "DUALSENSE FEATURES", settings_.dualsense ? "ON" : "OFF", true,
                          "The light bar follows Raiden's health: blue when he's well, to red as it runs low, a flash "
                          "when he's hit, white as Zandatsu repairs him, deep red in Ripper Mode. L2 (Blade Mode) "
@@ -547,6 +562,12 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     switch (row) {
       case kButtons:
         if (flip) settings_.ps_buttons = !settings_.ps_buttons;
+        break;
+      case kSkipIntro:
+        if (flip) settings_.skip_intro = !settings_.skip_intro;
+        break;
+      case kLightBar:
+        if (flip && settings_.dualsense) settings_.lightbar_effects = !settings_.lightbar_effects;
         break;
       case kDualSense:
         if (flip) settings_.dualsense = !settings_.dualsense;
@@ -1044,9 +1065,9 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
       const SettingLine& l = lines[size_t(r)];
       if (!section || std::strcmp(section, l.section) != 0) {
         section = l.section;
-        if (r) y += 14 * u;
+        if (r) y += 10 * u;
         Spaced(dl, g_body, 19 * u, ImVec2(left, y), P(kRed), section, 3 * u);
-        y += 36 * u;
+        y += 30 * u;
       }
       const bool sel = r == row_;
       const float fs = 36 * u;
@@ -1061,7 +1082,7 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
         dl->AddRectFilled(ImVec2(x0, yy - 3 * u), ImVec2(x0 + w * settings_.music / 100.0f, yy + 3 * u),
                           P(sel ? kRed : kGrey));
       }
-      y += fs + 10 * u;
+      y += fs + 4 * u;
     }
     // the focused row's help, at the right
     const float px = 1060 * u + page_dx_, pw = 720 * u;

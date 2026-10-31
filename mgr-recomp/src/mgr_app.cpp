@@ -131,6 +131,26 @@ extern "C" void sub_822B4198(PPCContext& __restrict ctx, uint8_t* base) {
 #endif
 }
 
+// Skip the startup logos. The boot loop (sub_82C00290) shows six logos (Konami,
+// Kojima Productions, PlatinumGames, Havok, CRI, Dolby: logo\*.wtb, loaded by
+// sub_82BFBF40) while the game loads, and carries on once both are done; the
+// logos' update (sub_82BFCB68, once a frame: its "done" flag at +416) is told
+// they're done, so the title comes as soon as the loading is.
+REXCVAR_DEFINE_BOOL(mgr_skip_intro, true, "Metal Gear Rising", "Skip the logos at the start");
+
+extern "C" void sub_82BFCB68(PPCContext& __restrict ctx, uint8_t* base) {
+  if (REXCVAR_GET(mgr_skip_intro)) {
+    static bool logged = false;
+    if (!logged) {
+      logged = true;
+      REXLOG_INFO("Metal Gear Rising: the startup logos skipped");
+    }
+    REX_STORE_U32(ctx.r3.u32 + 416, 1);
+    return;
+  }
+  __imp__sub_82BFCB68(ctx, base);
+}
+
 namespace {
 
 // The game's folders: game/ (the disc, with Title Update 4's default.xexp), its update/, dlc/ and saves/.

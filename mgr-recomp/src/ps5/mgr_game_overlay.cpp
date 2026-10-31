@@ -28,6 +28,9 @@
 REXCVAR_DEFINE_STRING(mgr_fps_counter, "off", "Metal Gear Rising",
                       "The frame rate counter while playing: off, simple (frames a second and the frame time) or "
                       "detailed (also the slowest frames and a graph)");
+REXCVAR_DEFINE_BOOL(mgr_lightbar_effects, true, "Metal Gear Rising",
+                    "The light bar flashes for hits and repairs and pulses in Ripper Mode and at low health "
+                    "(off: it shows only the health)");
 
 namespace mgrps5 {
 
@@ -205,10 +208,12 @@ void GameOverlay::Feedback() {
     // a deep red heartbeat
     const float ratio = std::clamp(float(p.health) / float(p.most), 0.0f, 1.0f);
     std::array<uint8_t, 3> color = Mix({255, 0, 0}, {60, 150, 255}, (ratio - 0.15f) / 0.75f);
-    if (ratio < 0.25f) color = Mix({70, 0, 0}, {255, 0, 0}, Beat(now, 1000));
-    if (p.ripper) color = Mix({110, 0, 10}, {255, 20, 40}, Beat(now, 600));
-    if (now < heal_until_ms_) color = {220, 245, 255};
-    if (now < hit_until_ms_) color = {255, 0, 0};
+    if (REXCVAR_GET(mgr_lightbar_effects)) {
+      if (ratio < 0.25f) color = Mix({70, 0, 0}, {255, 0, 0}, Beat(now, 1000));
+      if (p.ripper) color = Mix({110, 0, 10}, {255, 20, 40}, Beat(now, 600));
+      if (now < heal_until_ms_) color = {220, 245, 255};
+      if (now < hit_until_ms_) color = {255, 0, 0};
+    }
     state.color = color;
     // the triggers: L2 (Blade Mode) heavier with fuel in the cells (heaviest in
     // Ripper Mode), R2 (Ninja Run) a light, steady pedal

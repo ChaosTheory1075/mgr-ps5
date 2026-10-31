@@ -13,6 +13,14 @@
  * texture draws as the guest's, and the binding is refreshed when it arrives
  * (reading them on the GPU thread held up frames whenever new ones came in).
  *
+ * A patch (a DDS marked "PTCH" in its header's first reserved word, 32-bit
+ * RGBA) is drawn over the guest texture instead of replacing it: the guest's
+ * base level (DXT1 / DXT2_3 / DXT4_5) is decoded on the reader thread, scaled
+ * to the patch's size, and the patch's texels go over it except where they
+ * are (255, 0, 255, 0), which keeps the guest's. So a change to part of a
+ * texture (Metal Gear Rising's controller pictures: tools/ps_buttons.py) ships
+ * only what was drawn for it.
+ *
  * Only 2D, non-array, unsigned DXT1 / DXT2_3 / DXT4_5 / DXN / 8_8_8_8 textures
  * whose host format needs no swizzle of its own are replaced: their data's
  * channels are the replacement's (the converter, tools/mgr_texture_pack.py,
@@ -64,6 +72,16 @@ struct HdDds {
   bool block_compressed = true;
   uint32_t bytes_per_block = 0;  // (per texel when not block compressed)
   std::vector<uint8_t> data;     // every mip, smallest last
+  bool patch = false;            // drawn over the guest's texture (see the top)
+};
+
+// A guest texture's base level as loaded, for a patch to go over.
+struct HdGuest {
+  xenos::TextureFormat format = xenos::TextureFormat::k_DXT1;
+  xenos::Endian endianness = xenos::Endian::kNone;
+  uint32_t width = 0, height = 0, pitch = 0;  // (pitch in texels)
+  bool tiled = false;
+  std::vector<uint8_t> data;
 };
 
 struct HdReplacement {
@@ -98,6 +116,7 @@ struct HdReplacer {
   std::vector<uint64_t> requests;
   std::vector<std::pair<uint64_t, HdDds>> done;
   std::unordered_set<uint64_t> pending;  // (GPU thread only)
+  std::unordered_map<uint64_t, HdGuest> guest;  // (under mutex: for patches)
   std::thread reader;
   // report counters: loads seen, not replaceable (by reason), hashed, matched
   uint64_t seen = 0, skip_kind = 0, skip_swizzle = 0, skip_size = 0, skip_dynamic = 0, hashed = 0, matched = 0,
@@ -177,6 +196,161 @@ bool LoadDds(const fs::path& file, HdDds& d) {
   if (!mips) return false;
   d.mips = mips;
   d.data.assign(all.begin() + offset, all.begin() + offset + need);
+  d.patch = Read32(h + 28) == 0x48435450u;  // "PTCH"
+  return true;
+}
+
+// ---- patches ----
+
+// The Xbox 360's tiled layout (XGAddress2DTiledOffset), in blocks.
+uint32_t TiledOffset(uint32_t x, uint32_t y, uint32_t pitch, uint32_t bpb_log2) {
+  pitch = (pitch + 31) & ~31u;
+  const uint32_t macro = ((x >> 5) + (y >> 5) * (pitch >> 5)) << (bpb_log2 + 7);
+  const uint32_t micro = ((x & 7) + ((y & 0xE) << 2)) << bpb_log2;
+  const uint32_t offset = macro + ((micro & ~0xFu) << 1) + (micro & 0xF) + ((y & 1) << 4);
+  return ((((offset & ~0x1FFu) << 3) + ((y & 16) << 7) + ((offset & 0x1C0) << 2) +
+           (((((y & 8) >> 2) + (x >> 3)) & 3) << 6) + (offset & 0x3F)) >>
+          bpb_log2);
+}
+
+void Rgb565(uint16_t c, int out[3]) {
+  out[0] = ((c >> 11) & 31) * 255 / 31;
+  out[1] = ((c >> 5) & 63) * 255 / 63;
+  out[2] = (c & 31) * 255 / 31;
+}
+
+// One BC1/2/3 block (little-endian) into 4x4 RGBA.
+void DecodeBlock(const uint8_t* b, xenos::TextureFormat format, uint8_t out[16][4]) {
+  const bool dxt1 = format == xenos::TextureFormat::k_DXT1;
+  const uint8_t* color = dxt1 ? b : b + 8;
+  const uint16_t c0 = uint16_t(color[0] | color[1] << 8), c1 = uint16_t(color[2] | color[3] << 8);
+  const uint32_t indices = Read32(color + 4);
+  int p[4][4];
+  Rgb565(c0, p[0]);
+  Rgb565(c1, p[1]);
+  p[0][3] = p[1][3] = p[2][3] = p[3][3] = 255;
+  for (int k = 0; k < 3; ++k) {
+    if (!dxt1 || c0 > c1) {
+      p[2][k] = (2 * p[0][k] + p[1][k]) / 3;
+      p[3][k] = (p[0][k] + 2 * p[1][k]) / 3;
+    } else {
+      p[2][k] = (p[0][k] + p[1][k]) / 2;
+      p[3][k] = 0;
+    }
+  }
+  if (dxt1 && c0 <= c1) p[3][3] = 0;
+  for (int i = 0; i < 16; ++i) {
+    const int* s = p[(indices >> (2 * i)) & 3];
+    for (int k = 0; k < 4; ++k) out[i][k] = uint8_t(s[k]);
+  }
+  if (format == xenos::TextureFormat::k_DXT2_3) {
+    for (int i = 0; i < 16; ++i) out[i][3] = uint8_t(((b[i / 2] >> ((i & 1) * 4)) & 15) * 17);
+  } else if (format == xenos::TextureFormat::k_DXT4_5) {
+    const int a0 = b[0], a1 = b[1];
+    int a[8] = {a0, a1};
+    for (int i = 0; i < 6; ++i) {
+      a[2 + i] = a0 > a1 ? ((6 - i) * a0 + (1 + i) * a1) / 7 : i < 4 ? ((4 - i) * a0 + (1 + i) * a1) / 5 : 0;
+    }
+    if (a0 <= a1) a[7] = 255;
+    uint64_t bits = 0;
+    for (int i = 0; i < 6; ++i) bits |= uint64_t(b[2 + i]) << (8 * i);
+    for (int i = 0; i < 16; ++i) out[i][3] = uint8_t(a[(bits >> (3 * i)) & 7]);
+  }
+}
+
+// The guest's base level as RGBA (false: a format this doesn't read).
+bool DecodeGuest(const HdGuest& g, std::vector<uint8_t>& rgba) {
+  const bool dxt1 = g.format == xenos::TextureFormat::k_DXT1;
+  if (!dxt1 && g.format != xenos::TextureFormat::k_DXT2_3 && g.format != xenos::TextureFormat::k_DXT4_5) return false;
+  if (!g.width || !g.height || g.data.empty()) return false;
+  const uint32_t bpb = dxt1 ? 8 : 16, bw = (g.width + 3) / 4, bh = (g.height + 3) / 4;
+  const uint32_t pitch = ((g.pitch + 3) / 4 + 31) & ~31u;
+  rgba.assign(size_t(g.width) * g.height * 4, 0);
+  uint8_t block[16];
+  uint8_t texels[16][4];
+  for (uint32_t by = 0; by < bh; ++by) {
+    for (uint32_t bx = 0; bx < bw; ++bx) {
+      const size_t at = size_t(g.tiled ? TiledOffset(bx, by, pitch, dxt1 ? 3 : 4) : by * pitch + bx) * bpb;
+      if (at + bpb > g.data.size()) continue;
+      std::memcpy(block, g.data.data() + at, bpb);
+      if (g.endianness == xenos::Endian::k8in16 || g.endianness == xenos::Endian::k8in32) {
+        for (uint32_t i = 0; i + 1 < bpb; i += 2) std::swap(block[i], block[i + 1]);
+      }
+      if (g.endianness == xenos::Endian::k8in32 || g.endianness == xenos::Endian::k16in32) {
+        for (uint32_t i = 0; i + 3 < bpb; i += 4) {
+          std::swap(block[i], block[i + 2]);
+          std::swap(block[i + 1], block[i + 3]);
+        }
+      }
+      DecodeBlock(block, g.format, texels);
+      for (uint32_t i = 0; i < 16; ++i) {
+        const uint32_t x = bx * 4 + (i & 3), y = by * 4 + (i >> 2);
+        if (x < g.width && y < g.height) std::memcpy(&rgba[(size_t(y) * g.width + x) * 4], texels[i], 4);
+      }
+    }
+  }
+  return true;
+}
+
+// The patch's texels over the guest's (scaled to the patch's size, bilinear), as
+// RGBA with a full mip chain. False: the guest couldn't be read.
+bool ApplyPatch(const HdGuest& g, HdDds& d) {
+  std::vector<uint8_t> guest;
+  if (d.block_compressed || d.bytes_per_block != 4 || !DecodeGuest(g, guest)) return false;
+  const bool bgra = d.format == VK_FORMAT_B8G8R8A8_UNORM;
+  const uint32_t w = d.width, h = d.height;
+  std::vector<uint8_t> out(size_t(w) * h * 4);
+  for (uint32_t y = 0; y < h; ++y) {
+    for (uint32_t x = 0; x < w; ++x) {
+      uint8_t* o = &out[(size_t(y) * w + x) * 4];
+      const uint8_t* p = &d.data[(size_t(y) * w + x) * 4];
+      const uint8_t r = bgra ? p[2] : p[0], b = bgra ? p[0] : p[2];
+      if (!(r == 255 && p[1] == 0 && b == 255 && p[3] == 0)) {
+        o[0] = r, o[1] = p[1], o[2] = b, o[3] = p[3];
+        continue;
+      }
+      const float gx = std::max(0.0f, (x + 0.5f) * float(g.width) / float(w) - 0.5f);
+      const float gy = std::max(0.0f, (y + 0.5f) * float(g.height) / float(h) - 0.5f);
+      const uint32_t x0 = std::min(uint32_t(gx), g.width - 1), y0 = std::min(uint32_t(gy), g.height - 1);
+      const uint32_t x1 = std::min(x0 + 1, g.width - 1), y1 = std::min(y0 + 1, g.height - 1);
+      const float fx = gx - float(x0), fy = gy - float(y0);
+      for (int k = 0; k < 4; ++k) {
+        auto at = [&](uint32_t xx, uint32_t yy) { return float(guest[(size_t(yy) * g.width + xx) * 4 + k]); };
+        const float v = (at(x0, y0) * (1 - fx) + at(x1, y0) * fx) * (1 - fy) +
+                        (at(x0, y1) * (1 - fx) + at(x1, y1) * fx) * fy;
+        o[k] = uint8_t(std::clamp(v + 0.5f, 0.0f, 255.0f));
+      }
+    }
+  }
+  // the mips: each half the last (a box filter)
+  d.format = VK_FORMAT_R8G8B8A8_UNORM;
+  d.data = std::move(out);
+  d.mips = 1;
+  uint32_t lw = w, lh = h;
+  size_t level = 0;
+  while (lw > 1 || lh > 1) {
+    const uint32_t nw = std::max(lw / 2, 1u), nh = std::max(lh / 2, 1u);
+    const size_t base = d.data.size();
+    d.data.resize(base + size_t(nw) * nh * 4);
+    const uint8_t* src = d.data.data() + level;
+    uint8_t* dst = d.data.data() + base;
+    for (uint32_t y = 0; y < nh; ++y) {
+      for (uint32_t x = 0; x < nw; ++x) {
+        for (int k = 0; k < 4; ++k) {
+          uint32_t sum = 0;
+          for (uint32_t dy = 0; dy < 2; ++dy) {
+            for (uint32_t dx = 0; dx < 2; ++dx) {
+              sum += src[(size_t(std::min(y * 2 + dy, lh - 1)) * lw + std::min(x * 2 + dx, lw - 1)) * 4 + k];
+            }
+          }
+          dst[(size_t(y) * nw + x) * 4 + k] = uint8_t(sum / 4);
+        }
+      }
+    }
+    level = base;
+    lw = nw, lh = nh;
+    ++d.mips;
+  }
   return true;
 }
 
@@ -202,6 +376,20 @@ void HdReaderMain(HdReplacer* hd) {
     if (!LoadDds(file, dds)) {
       REXGPU_WARN("HD textures: can't read {}", file.string());
       dds = HdDds();
+    } else if (dds.patch) {
+      HdGuest guest;
+      {
+        std::lock_guard<std::mutex> lock(hd->mutex);
+        if (auto it = hd->guest.find(hash); it != hd->guest.end()) {
+          guest = std::move(it->second);
+          hd->guest.erase(it);
+        }
+      }
+      if (!ApplyPatch(guest, dds)) {
+        REXGPU_WARN("HD textures: can't apply the patch {} (the texture's format {})", file.string(),
+                    uint32_t(guest.format));
+        dds = HdDds();
+      }
     }
     std::lock_guard<std::mutex> lock(hd->mutex);
     hd->done.emplace_back(hash, std::move(dds));
@@ -493,6 +681,19 @@ void VulkanTextureCache::HdAfterLoad(VulkanTexture& texture, bool load_base) {
     return;
   }
   ++hd->matched;
+  if (!hd->loaded.count(hash) && !hd->pending.count(hash) && !hd->failed.count(hash) && size <= (8u << 20)) {
+    // (for a patch: the guest's texture as it is now; the reader takes it)
+    HdGuest guest;
+    guest.format = key.format;
+    guest.endianness = key.endianness;
+    guest.width = key.GetWidth();
+    guest.height = key.GetHeight();
+    guest.pitch = uint32_t(key.pitch) << 5;
+    guest.tiled = key.tiled != 0;
+    guest.data.assign(data, data + size);
+    std::lock_guard<std::mutex> lock(hd->mutex);
+    hd->guest[hash] = std::move(guest);
+  }
   texture.hd_replacement = HdLoad(hash);
   if (!texture.hd_replacement) texture.hd_pending = hash;
 }

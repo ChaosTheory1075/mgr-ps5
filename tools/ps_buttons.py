@@ -406,10 +406,14 @@ def main():
     image.putalpha(alpha)
     os.makedirs(out, exist_ok=True)
     write_dds(os.path.join(out, f"{ATLAS_HASH:016x}.dds"), image)
-    if len(sys.argv) > 3:  # a preview
+    # the controls pages' pad pictures and the HUD's Ninja Run tag (ps_controller.py)
+    import ps_controller
+    preview = sys.argv[3] if len(sys.argv) > 3 else None
+    ps_controller.write_all(font, out, os.path.dirname(preview) if preview else None)
+    if preview:
         bg = Image.new("RGBA", image.size, (30, 30, 50, 255))
         bg.alpha_composite(image)
-        bg.convert("RGB").save(sys.argv[3])
+        bg.convert("RGB").save(preview)
 
 
 if __name__ == "__main__":
