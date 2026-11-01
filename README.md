@@ -21,7 +21,8 @@ the Xbox 360.
   stronger rumble
 - A cheat quick menu: L3 + R3 in game for Infinite Health and Infinite Fuel Cells
 - English, French, German, Italian or Spanish text, or the PS5's own language
-- FXAA, anisotropic filtering (2x to 16x), an FPS counter and Skip Intro
+- FSR 1 upscaling to 4K with a sharpness setting, SMAA or FXAA, anisotropic filtering (2x to 16x), an
+  FPS counter, Skip Intro and an experimental FAST renderer
 - The DLC: Jetstream, Blade Wolf, the VR Mission Expansion and the costumes
 - The game's achievements as PS5-style trophies, with their own page in the menu
 - Installs the game, Title Update 4 and the DLC from your own files, at the drive's full speed

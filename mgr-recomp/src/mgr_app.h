@@ -24,6 +24,8 @@ class MgrApp : public rex::ReXApp {
   std::optional<rex::PathConfig> OnFinalizePaths(const rex::PathConfig& defaults,
                                                  std::function<void(rex::PathConfig)> resume) override;
   void OnPreSetup(rex::RuntimeConfig& config) override;
+  // The menu's UPSCALING and SHARPNESS, to the presenter (it read them before the menu).
+  void ApplyUpscaling();
   void OnPostSetup() override;
   void OnPostLaunchModule(rex::system::XThread* thread) override;
   void OnConfigureFonts(ImFontAtlas* atlas) override;

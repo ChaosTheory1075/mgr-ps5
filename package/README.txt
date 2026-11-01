@@ -52,7 +52,23 @@ CONTENT   the game, Title Update 4 and the DLC: installed or not, X installs
           one from install/, triangle (twice) uninstalls it.
 SAVES     BACK UP SAVES (to install/backups/), IMPORT an Xbox 360 save
           package from install/, RESTORE one of the backups.
-SETTINGS  LANGUAGE          the game's text and subtitles: English, French,
+SETTINGS  GRAPHICS
+          UPSCALING         FSR 1 (AMD's upscaler, the default) or bilinear:
+                            how the picture is enlarged to the TV (up to 4K).
+          SHARPNESS         FSR 1's sharpening: low, medium or high.
+          ANTI-ALIASING     off, FXAA or SMAA (the default).
+          TEXTURE FILTERING 2x to 16x anisotropic.
+          GPU HELPER        a second graphics thread (on); turn it off if
+                            something draws wrong.
+          FPS COUNTER       off, simple or detailed.
+          CONTROLLER
+          BUTTON PROMPTS    PlayStation (cross, circle, square, triangle, L1...)
+                            or the Xbox 360's.
+          DUALSENSE         the light bar follows Raiden's health, adaptive
+                            triggers on L2 (Blade Mode) and R2 (Ninja Run),
+                            stronger rumble; FEEDBACK STRENGTH and LIGHT BAR.
+          GAME
+          LANGUAGE          the game's text and subtitles: English, French,
                             German, Italian or Spanish. AUTO (the default)
                             follows the PS5's language, English otherwise.
           SKIP INTRO        no logos at the start (on).
@@ -61,16 +77,11 @@ SETTINGS  LANGUAGE          the game's text and subtitles: English, French,
                             for the quick menu - INFINITE HEALTH, INFINITE
                             FUEL CELLS, the FPS counter, the DualSense.
                             O or L3 + R3 closes it.
-          BUTTON ICONS      PlayStation (cross, circle, square, triangle, L1...)
-                            or the Xbox 360's.
-          DUALSENSE         the light bar follows Raiden's health, adaptive
-                            triggers on L2 (Blade Mode) and R2 (Ninja Run),
-                            stronger rumble; LIGHT BAR and FEEDBACK STRENGTH.
-          ANTI-ALIASING     off or FXAA.
-          TEXTURE FILTERING 2x to 16x anisotropic.
-          GPU HELPER        a second graphics thread (on); turn it off if
-                            something draws wrong.
-          FPS COUNTER       off, simple or detailed.
+          EXPERIMENTAL
+          RENDERER          ACCURATE (the default) or FAST: drawn with the
+                            PS5's own render targets, quicker but some effects
+                            may draw wrong.
+          AUDIO
           MENU MUSIC        the menu song's level.
 TROPHIES  every achievement, earned ones first, with their dates (filled in
           once the game has been started once).

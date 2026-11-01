@@ -176,7 +176,10 @@ int SystemLanguage() {
 
 struct Settings {
   int language = 0;   // kLanguages: AUTO, or the language the game is told (user_language)
-  bool fxaa = false;  // swap_post_effect: none or fxaa
+  int aa = 2;         // swap_post_effect: 0 none, 1 fxaa, 2 smaa (Max Payne 3 RePrescribed's)
+  bool fsr = true;    // the picture's stretch to the TV: FSR 1 (present_effect fsr) or bilinear
+  int sharpness = 3;  // FSR 1's sharpening (present_fsr_sharpness_reduction): 1 low, 2 medium, 3 high
+  bool host_rts = false;  // EXPERIMENTAL RENDERER: FAST (host render targets) or ACCURATE (EDRAM, fsi)
   int filter = 3;     // anisotropic_override 2..5: 2x, 4x, 8x, 16x
   bool lane = true;   // the GPU's second lane (crackdown_gpu_lane)
   int music = 60;     // the menu song's level, 0..100
@@ -192,6 +195,10 @@ struct Settings {
   bool cheat_fuel = false;
 
   static constexpr const char* kFilterNames[] = {"", "", "2X", "4X", "8X", "16X"};
+  static constexpr const char* kAaNames[] = {"OFF", "FXAA", "SMAA"};
+  static constexpr const char* kSharpnessNames[] = {"", "LOW", "MEDIUM", "HIGH"};
+  // FSR 1's RCAS sharpness reduction in stops (0 = sharpest) for each sharpness.
+  static constexpr const char* kSharpnessStops[] = {"", "1.0", "0.5", "0.2"};
 
   static Settings Load(const fs::path& app) {
     Settings s;
@@ -203,7 +210,11 @@ struct Settings {
         if (std::sscanf(line, " %63[a-z_] = %d", key, &value) != 2) continue;
         const std::string k(key);
         if (k == "language") s.language = LanguageIndex(value);
-        if (k == "fxaa") s.fxaa = value != 0;
+        if (k == "fxaa" && value) s.aa = 1;  // (the earlier on/off row's)
+        if (k == "anti_aliasing") s.aa = std::clamp(value, 0, 2);
+        if (k == "upscaling_fsr") s.fsr = value != 0;
+        if (k == "fsr_sharpness") s.sharpness = std::clamp(value, 1, 3);
+        if (k == "renderer_fast") s.host_rts = value != 0;
         if (k == "texture_filtering") s.filter = std::clamp(value, 2, 5);
         if (k == "gpu_lane") s.lane = value != 0;
         if (k == "menu_music") s.music = std::clamp(value, 0, 100);
@@ -226,10 +237,12 @@ struct Settings {
   void Save(const fs::path& app) const {
     if (std::FILE* f = std::fopen((app / "menu.ini").string().c_str(), "wb")) {
       std::fprintf(f,
-                   "language = %d\nfxaa = %d\ntexture_filtering = %d\ngpu_lane = %d\nmenu_music = %d\nps_buttons = %d\ndualsense = %d\n"
+                   "language = %d\nanti_aliasing = %d\nupscaling_fsr = %d\nfsr_sharpness = %d\nrenderer_fast = %d\n"
+                   "texture_filtering = %d\ngpu_lane = %d\nmenu_music = %d\nps_buttons = %d\ndualsense = %d\n"
                    "dualsense_strength = %d\nfps_counter = %d\nlightbar_effects = %d\nskip_intro = %d\n"
                    "hd_cutscenes = %d\ncheat_menu = %d\ncheat_health = %d\ncheat_fuel = %d\n",
-                   kLanguages[language].xbox, fxaa ? 1 : 0, filter, lane ? 1 : 0, music, ps_buttons ? 1 : 0, dualsense ? 1 : 0,
+                   kLanguages[language].xbox, aa, fsr ? 1 : 0, sharpness, host_rts ? 1 : 0, filter, lane ? 1 : 0,
+                   music, ps_buttons ? 1 : 0, dualsense ? 1 : 0,
                    dualsense_strength, fps_counter, lightbar_effects ? 1 : 0, skip_intro ? 1 : 0,
                    hd_movies ? 1 : 0, cheat_menu ? 1 : 0, cheat_health ? 1 : 0, cheat_fuel ? 1 : 0);
       std::fclose(f);
@@ -243,7 +256,17 @@ struct Settings {
     rex::cvar::SetFlagByName("draw_resolution_scale_y", "1");
     // (the game paces itself to 60, as on the Xbox 360: the TV's vblanks)
     rex::cvar::SetFlagByName("vsync", "true");
-    rex::cvar::SetFlagByName("swap_post_effect", fxaa ? "fxaa" : "none");
+    {
+      // (init-only, and the start's flags are final by now; the GPU is set up after this menu)
+      rex::cvar::testing::ScopedLifecycleOverride override_init_only;  // (always built, cvar.cpp)
+      rex::cvar::SetFlagByName("render_target_path_vulkan", host_rts ? "fbo" : "fsi");
+      // (host render targets: an unclipped draw's height from its vertices, run on the CPU - Max Payne 3
+      // RePrescribed's FAST renderer lost its HDR scene and depth without it)
+      rex::cvar::SetFlagByName("execute_unclipped_draw_vs_on_cpu", host_rts ? "true" : "false");
+    }
+    rex::cvar::SetFlagByName("swap_post_effect", aa == 2 ? "smaa" : aa == 1 ? "fxaa" : "none");
+    rex::cvar::SetFlagByName("present_effect", fsr ? "fsr" : "bilinear");
+    rex::cvar::SetFlagByName("present_fsr_sharpness_reduction", kSharpnessStops[sharpness]);
     rex::cvar::SetFlagByName("anisotropic_override", std::to_string(filter));
     rex::cvar::SetFlagByName("crackdown_gpu_lane", lane ? "true" : "false");
     // (the PlayStation icons are the only replacement textures: tools/ps_buttons.py)
@@ -267,9 +290,10 @@ struct Settings {
     REXLOG_INFO("Metal Gear Rising: Revengeance menu: language {} (Xbox 360 language {}), cheat menu {} (health "
                 "{}, fuel {})", kLanguages[language].name, xbox_language, cheat_menu ? "on" : "off",
                 cheat_menu && cheat_health ? "on" : "off", cheat_menu && cheat_fuel ? "on" : "off");
-    REXLOG_INFO("Metal Gear Rising: Revengeance menu: anti-aliasing {}, texture filtering {}, the GPU's second lane {}, "
-                "{} button icons, DualSense features {} (strength {}), FPS counter {}",
-                fxaa ? "FXAA" : "off", kFilterNames[filter], lane ? "on" : "off", ps_buttons ? "PlayStation" : "Xbox",
+    REXLOG_INFO("Metal Gear Rising: Revengeance menu: upscaling {} (sharpness {}), anti-aliasing {}, texture filtering {}, "
+                "the GPU's second lane {}, renderer {}, {} button icons, DualSense features {} (strength {}), FPS counter {}",
+                fsr ? "FSR 1" : "bilinear", kSharpnessNames[sharpness], kAaNames[aa], kFilterNames[filter],
+                lane ? "on" : "off", host_rts ? "fast" : "accurate", ps_buttons ? "PlayStation" : "Xbox",
                 dualsense ? "on" : "off", dualsense_strength, fps_counter);
   }
 };
@@ -329,8 +353,8 @@ const char* const kPageNames[kPages] = {"HOME", "CONTENT", "SAVES", "SETTINGS", 
 // The settings page's rows, in its order (a new option: a row here, its line
 // in SettingsLines and its change in ChangeSetting).
 enum SettingsRow {
-  kLanguageRow, kSkipIntro, kHdMovies, kCheatMenu, kButtons, kDualSense, kLightBar, kDualSenseStrength, kAntiAliasing, kFiltering, kLane, kFpsCounter, kMusic,
-  kSettingsRows
+  kUpscaling, kSharpness, kAntiAliasing, kFiltering, kLane, kFpsCounter, kButtons, kDualSense, kDualSenseStrength,
+  kLightBar, kLanguageRow, kSkipIntro, kHdMovies, kCheatMenu, kRenderer, kMusic, kSettingsRows
 };
 
 class MenuDialog final : public rex::ui::ImGuiDialog {
@@ -343,6 +367,7 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     for (const char* name : {"background.jpg", "background.png"})
       if (!background_) background_ = Load(hub / name);
     logo_ = Load(hub / "logo.png");
+    title_ = Load(hub / "title.png");
     std::error_code ec;
     // (an install the app was closed during: not to be taken for a finished one)
     fs::remove_all(app / "game.installing", ec);
@@ -573,7 +598,19 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     char music[16];
     std::snprintf(music, sizeof(music), "%d%%", settings_.music);
     std::vector<SettingLine> lines(kSettingsRows);
-    lines[kLanguageRow] = {"GAMEPLAY", "LANGUAGE",
+    lines[kUpscaling] = {"GRAPHICS", "UPSCALING", settings_.fsr ? "FSR 1" : "BILINEAR", true,
+                         "How the picture is enlarged to your TV's resolution (up to 4K). FSR 1, AMD's upscaler, keeps "
+                         "edges and detail sharp at almost no cost to the frame rate; BILINEAR is a plain, softer "
+                         "stretch."};
+    lines[kSharpness] = {"GRAPHICS", "SHARPNESS", settings_.fsr ? Settings::kSharpnessNames[settings_.sharpness] : "-",
+                         settings_.fsr,
+                         "How much FSR 1 sharpens the enlarged picture. HIGH is crispest but can make edges look "
+                         "harsh; LOW is gentler."};
+    lines[kRenderer] = {"EXPERIMENTAL", "RENDERER", settings_.host_rts ? "FAST" : "ACCURATE", true,
+                        "ACCURATE copies the Xbox 360's video memory exactly, pixel by pixel. FAST draws with the PS5's "
+                        "own graphics hardware: quicker, but some effects may draw wrong. Testing: if anything looks "
+                        "off, set it back to ACCURATE."};
+    lines[kLanguageRow] = {"GAME", "LANGUAGE",
                            settings_.language ? std::string(kLanguages[settings_.language].name)
                                               : std::string("AUTO (") +
                                                     kLanguages[LanguageIndex(SystemLanguage())].name + ")",
@@ -581,17 +618,17 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
                            "The game's text, menus and subtitles: English, French, German, Italian or Spanish (the "
                            "voices are English in all of them). AUTO follows the PS5's own language, or English when "
                            "the game doesn't have it. Takes effect when you PLAY."};
-    lines[kCheatMenu] = {"GAMEPLAY", "CHEAT MENU", settings_.cheat_menu ? "ON" : "OFF", true,
+    lines[kCheatMenu] = {"GAME", "CHEAT MENU (L3 + R3)", settings_.cheat_menu ? "ON" : "OFF", true,
                          "While you play, press L3 + R3 together (both sticks in) to open the quick menu: "
                          "INFINITE HEALTH, INFINITE FUEL CELLS (Blade Mode and Ripper Mode without end), the FPS "
                          "counter and the DualSense features. O or L3 + R3 again closes it. OFF: L3 + R3 does "
                          "nothing and the cheats are off."};
-    lines[kSkipIntro] = {"GAMEPLAY", "SKIP INTRO", settings_.skip_intro ? "ON" : "OFF", true,
+    lines[kSkipIntro] = {"GAME", "SKIP INTRO", settings_.skip_intro ? "ON" : "OFF", true,
                          "Go straight to the title screen, without the Konami, Kojima Productions, PlatinumGames "
                          "and other logos at the start."};
     char hd[48];
     std::snprintf(hd, sizeof(hd), "%s (%d)", settings_.hd_movies ? "ON" : "OFF", hd_movies_);
-    lines[kHdMovies] = {"GAMEPLAY", "HD CUTSCENES", hd_movies_ ? std::string(hd) : std::string("NOT INSTALLED"),
+    lines[kHdMovies] = {"GAME", "HD CUTSCENES", hd_movies_ ? std::string(hd) : std::string("NOT INSTALLED"),
                         hd_movies_ > 0,
                         "The cutscenes remastered to 1080p at 60 frames a second (MGRR FULLHD 60FPS CUTSCENE "
                         "UPSCALE on Nexus Mods), in place of the Xbox 360's 576p at 30. Put its two zips, as "
@@ -603,7 +640,7 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
                         "HEALTH + EFFECTS: the light bar follows Raiden's health and also flashes for hits and "
                         "repairs, pulses at low health and beats red in Ripper Mode. HEALTH ONLY: just the health, "
                         "blue to red, steady."};
-    lines[kButtons] = {"CONTROLLER", "BUTTON ICONS", settings_.ps_buttons ? "PLAYSTATION" : "XBOX", true,
+    lines[kButtons] = {"CONTROLLER", "BUTTON PROMPTS", settings_.ps_buttons ? "PLAYSTATION" : "XBOX", true,
                        "The buttons the game shows in its prompts, menus and tutorials: cross, circle, square and "
                        "triangle, L1 R1 L2 R2, OPTIONS, and a PlayStation pad on the controls pages - or the Xbox "
                        "360's own."};
@@ -621,9 +658,10 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
                           "A frame rate counter at the left edge of the screen while you play. SIMPLE shows frames a "
                           "second and the frame time; DETAILED also the slowest frames and a graph of the last two "
                           "seconds."};
-    lines[kAntiAliasing] = {"GRAPHICS", "ANTI-ALIASING", settings_.fxaa ? "FXAA" : "OFF", true,
-                            "FXAA smooths the jagged edges of the picture as it goes to the screen. It costs the PS5's "
-                            "GPU a little and blurs fine detail slightly."};
+    lines[kAntiAliasing] = {"GRAPHICS", "ANTI-ALIASING", Settings::kAaNames[settings_.aa], true,
+                            "Smooths jagged edges before the picture is enlarged. SMAA finds edges by their shape and "
+                            "keeps the rest sharp; FXAA is a little cheaper but blurs fine detail. Both cost the "
+                            "PS5's GPU very little."};
     lines[kFiltering] = {"GRAPHICS", "TEXTURE FILTERING",
                          std::string(Settings::kFilterNames[settings_.filter]) + " ANISOTROPIC", true,
                          "How sharp floors, walls and streets stay when seen at an angle. Higher is sharper; the PS5's "
@@ -669,8 +707,20 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
         if (cross) settings_.fps_counter = (settings_.fps_counter + 1) % 3;
         settings_.fps_counter = std::clamp(settings_.fps_counter + step, 0, 2);
         break;
+      case kUpscaling:
+        if (flip) settings_.fsr = !settings_.fsr;
+        break;
+      case kSharpness:
+        if (!settings_.fsr) break;
+        if (cross) settings_.sharpness = settings_.sharpness % 3 + 1;
+        settings_.sharpness = std::clamp(settings_.sharpness + step, 1, 3);
+        break;
       case kAntiAliasing:
-        if (flip) settings_.fxaa = !settings_.fxaa;
+        if (cross) settings_.aa = (settings_.aa + 1) % 3;
+        settings_.aa = std::clamp(settings_.aa + step, 0, 2);
+        break;
+      case kRenderer:
+        if (flip) settings_.host_rts = !settings_.host_rts;
         break;
       case kFiltering:
         if (cross) settings_.filter = settings_.filter == 5 ? 2 : settings_.filter + 1;
@@ -892,10 +942,16 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
       x += w + 52 * u;
     }
     button(x - 22 * u, "R1");
-    // the project's name at the right
-    const char* name = "METAL GEAR RISING  REPLATINUM";
-    const float nw = Width(g_body, 20 * u, name);
-    dl->AddText(g_body, 20 * u, ImVec2(size.x - 140 * u - nw, y + 12 * u), A(kDim), name);
+    // the project's name at the right (hub/title.png: METAL GEAR RISING over a spaced REPLATINUM)
+    if (title_) {
+      const float th = 56 * u, tw = title_.w * th / title_.h;
+      dl->AddImage(title_.id, ImVec2(size.x - 140 * u - tw, y - 6 * u), ImVec2(size.x - 140 * u, y - 6 * u + th),
+                   ImVec2(0, 0), ImVec2(1, 1), A(kWhite));
+    } else {
+      const char* name = "METAL GEAR RISING  REPLATINUM";
+      const float nw = Width(g_body, 20 * u, name);
+      dl->AddText(g_body, 20 * u, ImVec2(size.x - 140 * u - nw, y + 12 * u), A(kDim), name);
+    }
     dl->AddRectFilled(ImVec2(tab_x_, y + 56 * u), ImVec2(tab_x_ + tab_w_, y + 61 * u), A(kRed));
     dl->AddRectFilled(ImVec2(140 * u, y + 61 * u), ImVec2(size.x - 140 * u, y + 62 * u), A(IM_COL32(255, 255, 255, 40)));
   }
@@ -914,7 +970,7 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
       case kTrophies: hints = "UP DOWN  MOVE      LEFT RIGHT  PAGE UP / DOWN      O  BACK      L1 R1  PAGES"; break;
       default: hints = "O  BACK      L1 R1  PAGES"; break;
     }
-    dl->AddText(g_body, 22 * u, ImVec2(size.x - 140 * u - Width(g_body, 22 * u, hints), y), A(kGrey), hints.c_str());
+    dl->AddText(g_body, 22 * u, ImVec2(size.x - 140 * u - Width(g_body, 22 * u, hints), y), A(kRed), hints.c_str());
   }
 
   void DrawHome(ImDrawList* dl, const ImVec2& size) {
@@ -1146,19 +1202,31 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
 
   void DrawSettings(ImDrawList* dl, const ImVec2& size) {
     const float u = u_, left = 140 * u + page_dx_;
-    float y = 190 * u;
     const auto lines = SettingsLines();
-    const char* section = nullptr;
+    const float fs = 36 * u, top = 190 * u, bottom = size.y - 120 * u;
+    // where each row and section heading goes (scrolled so the focused row stays in view)
+    std::vector<float> row_y(kSettingsRows, 0.0f), head_y(kSettingsRows, -1.0f);
+    float y = 0;
+    for (int r = 0; r < kSettingsRows; ++r) {
+      if (!r || std::strcmp(lines[size_t(r - 1)].section, lines[size_t(r)].section) != 0) {
+        if (r) y += 14 * u;
+        head_y[size_t(r)] = y;
+        y += 36 * u;
+      }
+      row_y[size_t(r)] = y;
+      y += fs + 16 * u;
+    }
+    const float view = bottom - top;
+    const float want = std::clamp(row_y[size_t(row_)] - view * 0.45f, 0.0f, std::max(0.0f, y - view));
+    settings_scroll_ += (want - settings_scroll_) * 0.25f;
+    dl->PushClipRect(ImVec2(0, top - 4 * u), ImVec2(1000 * u + page_dx_, bottom), true);
     for (int r = 0; r < kSettingsRows; ++r) {
       const SettingLine& l = lines[size_t(r)];
-      if (!section || std::strcmp(section, l.section) != 0) {
-        section = l.section;
-        if (r) y += 10 * u;
-        Spaced(dl, g_body, 19 * u, ImVec2(left, y), P(kRed), section, 3 * u);
-        y += 30 * u;
-      }
+      if (head_y[size_t(r)] >= 0)
+        Spaced(dl, g_body, 19 * u, ImVec2(left, top + head_y[size_t(r)] - settings_scroll_), P(kRed), l.section,
+               3 * u);
+      y = top + row_y[size_t(r)] - settings_scroll_;
       const bool sel = r == row_;
-      const float fs = 36 * u;
       const ImU32 col = !l.enabled ? kDim : sel ? kWhite : kGrey;
       if (sel) dl->AddRectFilled(ImVec2(left - 30 * u, y + 8 * u), ImVec2(left - 20 * u, y + fs), P(kRed));
       dl->AddText(g_item, fs, ImVec2(left, y), P(col), l.label);
@@ -1170,8 +1238,8 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
         dl->AddRectFilled(ImVec2(x0, yy - 3 * u), ImVec2(x0 + w * settings_.music / 100.0f, yy + 3 * u),
                           P(sel ? kRed : kGrey));
       }
-      y += fs + 4 * u;
     }
+    dl->PopClipRect();
     // the focused row's help, at the right
     const float px = 1060 * u + page_dx_, pw = 720 * u;
     dl->AddRectFilled(ImVec2(px - 40 * u, 190 * u), ImVec2(px - 39 * u, 760 * u), P(IM_COL32(255, 255, 255, 40)));
@@ -1291,19 +1359,20 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
   }
 
   void DrawCredits(ImDrawList* dl, const ImVec2& size) {
-    const float u = u_, x = 140 * u + page_dx_, w = 820 * u;
+    const float u = u_, x = 140 * u + page_dx_, w = 860 * u;
     float y = 180 * u;
+    dl->PushClipRect(ImVec2(0, 0), ImVec2(size.x, size.y - 120 * u), true);  // (not into the clock)
     auto entry = [&](const char* name, const char* text) {
-      dl->AddText(g_item, 32 * u, ImVec2(x, y), P(kWhite), name);
-      y += 44 * u;
-      dl->AddText(g_body, 24 * u, ImVec2(x, y), P(kGrey), text, nullptr, w);
-      y += g_body->CalcTextSizeA(24 * u, FLT_MAX, w, text).y + 28 * u;
+      dl->AddText(g_item, 26 * u, ImVec2(x, y), P(kWhite), name);
+      y += 34 * u;
+      dl->AddText(g_body, 20 * u, ImVec2(x, y), P(kGrey), text, nullptr, w);
+      y += g_body->CalcTextSizeA(20 * u, FLT_MAX, w, text).y + 20 * u;
     };
     // the project
     dl->AddText(g_title, 60 * u, ImVec2(x, y - 6 * u), P(kWhite), "METAL GEAR RISING");
     const float tw = Width(g_title, 60 * u, "METAL GEAR RISING");
     Spaced(dl, g_item, 30 * u, ImVec2(x + tw + 22 * u, y + 24 * u), P(kRed), "REPLATINUM", 6 * u);
-    y += 96 * u;
+    y += 84 * u;
     entry("BY CHAOSTHEORY1075", "github.com/ChaosTheory1075/mgr-ps5");
     dl->AddText(g_body, 20 * u, ImVec2(x, y), P(kRed), "ALL THE CREDIT GOES TO");
     y += 40 * u;
@@ -1328,13 +1397,13 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
       const char* thanks =
           "For Raiden's best day: Blade Mode, the parries, Jetstream Sam, and a soundtrack that sings along to "
           "every boss. Rules of nature.";
-      const float th = g_body->CalcTextSizeA(26 * u, FLT_MAX, pw - 48 * u, thanks).y;
+      const float th = g_body->CalcTextSizeA(22 * u, FLT_MAX, pw - 48 * u, thanks).y;
       dl->AddRectFilled(ImVec2(px - 24 * u, py - 16 * u), ImVec2(px + pw, py + 96 * u + th),
                         P(IM_COL32(8, 8, 8, 170)), 6 * u);
       dl->AddRectFilled(ImVec2(px - 24 * u, py - 16 * u), ImVec2(px - 18 * u, py + 96 * u + th), P(kRed));
       dl->AddText(g_body, 20 * u, ImVec2(px, py), P(kRed), "SPECIAL THANKS");
       dl->AddText(g_item, 40 * u, ImVec2(px, py + 30 * u), P(kWhite), "PLATINUMGAMES  &  KOJIMA PRODUCTIONS");
-      dl->AddText(g_body, 26 * u, ImVec2(px, py + 84 * u), P(kGrey), thanks, nullptr, pw - 48 * u);
+      dl->AddText(g_body, 22 * u, ImVec2(px, py + 84 * u), P(kGrey), thanks, nullptr, pw - 48 * u);
       py += 96 * u + th + 46 * u;
     }
     if (!song_.empty()) {
@@ -1348,14 +1417,15 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
         "An unofficial fan project, not affiliated with or endorsed by Konami, PlatinumGames, Microsoft or Sony. "
         "Metal Gear and all related names belong to their owners. No game files are included: you need your own "
         "copy of Metal Gear Rising: Revengeance for the Xbox 360.";
-    dl->AddText(g_body, 24 * u, ImVec2(px, py), P(kGrey), note, nullptr, pw);
-    py += g_body->CalcTextSizeA(24 * u, FLT_MAX, pw, note).y + 36 * u;
+    dl->AddText(g_body, 20 * u, ImVec2(px, py), P(kGrey), note, nullptr, pw);
+    py += g_body->CalcTextSizeA(20 * u, FLT_MAX, pw, note).y + 28 * u;
     dl->AddText(g_body, 20 * u, ImVec2(px, py), P(kRed), "BUILT WITH");
     py += 36 * u;
-    dl->AddText(g_body, 22 * u, ImVec2(px, py), P(kGrey),
+    dl->AddText(g_body, 19 * u, ImVec2(px, py), P(kGrey),
                 "PS5 Payload SDK  /  Mesa RADV (Vulkan)  /  Dear ImGui\nstb_image, dr_mp3, zlib, xxHash  /  Oswald and "
                 "Inter (SIL Open Font License)\nBlackBearReloaded's PS5 AT9 Converter (the home screen music)",
                 nullptr, pw);
+    dl->PopClipRect();
   }
 
   // ---- files ----
@@ -1399,7 +1469,7 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
   Settings settings_;
   int hd_movies_ = 0;  // (the HD cutscenes in movie_hd/)
   Pad pad_;
-  Image background_, logo_;
+  Image background_, logo_, title_;  // (title_: hub/title.png, the header's logo)
   gta4ps5::sound::Voice* music_ = nullptr;
   std::string song_;
   install::Installed installed_;
@@ -1412,6 +1482,7 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
   uint64_t leftover_bytes_ = 0;
   Page page_ = kHome;
   int row_ = kAntiAliasing, trophy_ = 0;
+  float settings_scroll_ = 0;  // (the settings list's scroll, eased)
   trophies::List trophies_;
   std::vector<Item> items_;
   std::map<uint32_t, Image> pictures_;
