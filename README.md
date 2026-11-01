@@ -14,7 +14,14 @@ the Xbox 360.
 - Metal Gear Rising: Revengeance with Title Update 4, recompiled to run natively on the PS5 (not
   emulated)
 - 60 FPS, as the game was made
-- FXAA and anisotropic filtering (2x to 16x)
+- Optional HD cutscenes: the 1080p 60 FPS cutscene pack from Nexus Mods, installed on the console
+  from its two zips
+- PlayStation button prompts and controller pictures (or the Xbox 360's)
+- DualSense: the light bar follows Raiden's health, adaptive triggers for Blade Mode and Ninja Run,
+  stronger rumble
+- A cheat quick menu: L3 + R3 in game for Infinite Health and Infinite Fuel Cells
+- English, French, German, Italian or Spanish text, or the PS5's own language
+- FXAA, anisotropic filtering (2x to 16x), an FPS counter and Skip Intro
 - The DLC: Jetstream, Blade Wolf, the VR Mission Expansion and the costumes
 - The game's achievements as PS5-style trophies, with their own page in the menu
 - Installs the game, Title Update 4 and the DLC from your own files, at the drive's full speed
@@ -80,6 +87,11 @@ The build checks the two files by their SHA-1s. It applies `ci/pc_patches.py`,
 - **Crackdown: ReActivated** and **Max Payne 3 RePrescribed** (ChaosTheory1075): the sister ports
   whose menu, installer, saves and trophies this one shares
 - **BlackBearReloaded**: the PS5 AT9 Converter (the home screen music)
+- The makers of **MGRR FULLHD 60FPS CUTSCENE UPSCALE**
+  ([Nexus Mods](https://www.nexusmods.com/metalgearrisingrevengeance/mods/505)), the HD cutscenes
+  the app installs (download them from there)
+- **chronicer**: [mgrCheatSamQTE](https://github.com/chronicer/mgrCheatSamQTE), whose PC game
+  structures pointed the way to the cheats
 - Built with the PS5 Payload SDK, Mesa RADV, Dear ImGui, stb_image, dr_mp3, and the Oswald and Inter
   fonts (SIL Open Font License)
 - Special thanks to **PlatinumGames** and **Kojima Productions**, for Metal Gear Rising
