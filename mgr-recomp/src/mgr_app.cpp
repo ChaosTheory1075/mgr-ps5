@@ -19,6 +19,7 @@
 #include "ps5/mgr_game_overlay.h"
 #include "ps5/mgr_install.h"
 #include "ps5/mgr_menu.h"
+#include "ps5/mgr_quick_menu.h"
 #include "ps5/mgr_trophies_game.h"
 
 namespace fs = std::filesystem;
@@ -122,6 +123,8 @@ void MgrApp::OnPostSetup() {
   if (runtime()) mgrps5::WriteTrophyCatalog(runtime(), runtime()->user_data_root());
   // The frame rate counter and the DualSense's features (ps5/mgr_game_overlay.h).
   mgrps5::StartGameOverlay(imgui_drawer());
+  // The quick menu, L3 + R3 (ps5/mgr_quick_menu.h): over the counter.
+  mgrps5::StartQuickMenu(imgui_drawer());
 #endif
   // HD cutscenes: the app's movie_hd/ as moviehd:\ (the kernel's NtCreateFile opens a cutscene's
   // movie from there when it has it: ci/patch_framework.py)
@@ -146,6 +149,16 @@ extern "C" void sub_822B4198(PPCContext& __restrict ctx, uint8_t* base) {
   __imp__sub_822B4198(ctx, base);
 #if REX_PLATFORM_PS5
   mgrps5::NotePlayerCreated(player);
+#endif
+}
+
+// The title's XInputGetState (XamInputGetState with flags 1: r3 the user, r4 the state; 0 when read): the
+// quick menu's L3 + R3, and the idle pad the game gets while it's open (ps5/mgr_quick_menu.h).
+extern "C" void sub_823236C0(PPCContext& __restrict ctx, uint8_t* base) {
+  const uint32_t user = ctx.r3.u32, state = ctx.r4.u32;
+  __imp__sub_823236C0(ctx, base);
+#if REX_PLATFORM_PS5
+  if (user == 0 && state && ctx.r3.u32 == 0) mgrps5::FilterPad(base, state);
 #endif
 }
 
@@ -188,7 +201,8 @@ extern "C" void sub_828CA630(PPCContext& __restrict ctx, uint8_t* base) {
   g_movie_starting = true;
   __imp__sub_828CA630(ctx, base);
   g_movie_starting = false;
-  if (ctx.r3.u32 == 0) {
+  // (0 with no picture size yet is the header still loading: the game tries again next frame)
+  if (ctx.r3.u32 == 0 && REX_LOAD_U32(movie + 64) != 0xFFFFFFFFu) {
     REXLOG_WARN("Metal Gear Rising: a movie didn't start (state {}, picture {}x{})", REX_LOAD_U32(movie + 8),
                 REX_LOAD_U32(movie + 64), REX_LOAD_U32(movie + 68));
   }

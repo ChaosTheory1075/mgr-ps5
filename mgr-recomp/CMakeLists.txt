@@ -23,7 +23,7 @@ if(PS5)
     if(NOT EXISTS "${MGR_PS5_PAYLOAD_SRC}/store_unzip.cpp")
         message(FATAL_ERROR "the installer payload's source isn't at ${MGR_PS5_PAYLOAD_SRC}")
     endif()
-    list(APPEND MGR_APP_SOURCES src/ps5/mgr_menu.cpp src/ps5/mgr_install.cpp src/ps5/mgr_trophies.cpp src/ps5/mgr_trophies_game.cpp src/ps5/mgr_game_overlay.cpp
+    list(APPEND MGR_APP_SOURCES src/ps5/mgr_menu.cpp src/ps5/mgr_install.cpp src/ps5/mgr_trophies.cpp src/ps5/mgr_trophies_game.cpp src/ps5/mgr_game_overlay.cpp src/ps5/mgr_quick_menu.cpp
          "${GTA4_PS5_SRC}/game/sound.cpp" "${GTA4_PS5_SRC}/hub/hub_sfx.cpp"
          # (the installer payload's zip reader: the HD cutscenes' packs, found and unpacked in the app too)
          "${MGR_PS5_PAYLOAD_SRC}/store_unzip.cpp")

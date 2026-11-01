@@ -44,6 +44,7 @@ int scePadInit(void);
 int scePadOpen(int32_t user_id, int32_t type, int32_t index, const void* param);
 int scePadGetHandle(int32_t user_id, int32_t type, int32_t index);
 int scePadReadState(int32_t handle, void* data);
+int sceSystemServiceParamGetInt(int param_id, int* value);
 }
 
 // The fonts, built into the app (gta4-ps5's ps5/assets/fonts: Oswald and
@@ -143,7 +144,38 @@ class Pad {
 
 // ---- the settings (app/menu.ini: key=value lines) ----
 
+// The game's languages (the disc has its text in these: us, fr, de, it, es), as the Xbox 360 numbers them
+// for XCONFIG_USER_LANGUAGE, which the game reads (sub_823247A8); AUTO is the PS5's own language.
+struct Language {
+  const char* name;
+  int xbox;  // 0: AUTO
+};
+constexpr Language kLanguages[] = {{"AUTO", 0},   {"ENGLISH", 1}, {"FRENCH", 4},
+                                   {"GERMAN", 3}, {"ITALIAN", 6}, {"SPANISH", 5}};
+constexpr int kLanguageCount = int(sizeof(kLanguages) / sizeof(kLanguages[0]));
+
+// kLanguages' row for an Xbox 360 language number (AUTO for none of them).
+int LanguageIndex(int xbox) {
+  for (int i = 0; i < kLanguageCount; ++i)
+    if (kLanguages[i].xbox == xbox) return i;
+  return 0;
+}
+
+// The PS5's language as the Xbox 360 numbers it; English for one the game doesn't have.
+int SystemLanguage() {
+  int v = 1;  // (English, US)
+  if (sceSystemServiceParamGetInt(1 /* SCE_SYSTEM_SERVICE_PARAM_ID_LANG */, &v) != 0) v = 1;
+  switch (v) {
+    case 2: case 22: return 4;  // French, French (Canada)
+    case 3: case 20: return 5;  // Spanish, Spanish (Latin America)
+    case 4: return 3;           // German
+    case 5: return 6;           // Italian
+    default: return 1;
+  }
+}
+
 struct Settings {
+  int language = 0;   // kLanguages: AUTO, or the language the game is told (user_language)
   bool fxaa = false;  // swap_post_effect: none or fxaa
   int filter = 3;     // anisotropic_override 2..5: 2x, 4x, 8x, 16x
   bool lane = true;   // the GPU's second lane (crackdown_gpu_lane)
@@ -155,6 +187,9 @@ struct Settings {
   bool lightbar_effects = true;  // the light bar's flashes and pulses (mgr_lightbar_effects)
   bool skip_intro = true;        // no logos at the start (mgr_skip_intro)
   bool hd_movies = true;         // the cutscenes from movie_hd/ (mgr_hd_movies)
+  bool cheat_menu = true;        // L3 + R3 opens the quick menu (mgr_cheat_menu: mgr_quick_menu.h)
+  bool cheat_health = false;     // the quick menu's cheats, as it left them (mgr_cheat_health, mgr_cheat_fuel)
+  bool cheat_fuel = false;
 
   static constexpr const char* kFilterNames[] = {"", "", "2X", "4X", "8X", "16X"};
 
@@ -167,6 +202,7 @@ struct Settings {
         int value = 0;
         if (std::sscanf(line, " %63[a-z_] = %d", key, &value) != 2) continue;
         const std::string k(key);
+        if (k == "language") s.language = LanguageIndex(value);
         if (k == "fxaa") s.fxaa = value != 0;
         if (k == "texture_filtering") s.filter = std::clamp(value, 2, 5);
         if (k == "gpu_lane") s.lane = value != 0;
@@ -178,6 +214,9 @@ struct Settings {
         if (k == "lightbar_effects") s.lightbar_effects = value != 0;
         if (k == "skip_intro") s.skip_intro = value != 0;
         if (k == "hd_cutscenes") s.hd_movies = value != 0;
+        if (k == "cheat_menu") s.cheat_menu = value != 0;
+        if (k == "cheat_health") s.cheat_health = value != 0;
+        if (k == "cheat_fuel") s.cheat_fuel = value != 0;
       }
       std::fclose(f);
     }
@@ -187,12 +226,12 @@ struct Settings {
   void Save(const fs::path& app) const {
     if (std::FILE* f = std::fopen((app / "menu.ini").string().c_str(), "wb")) {
       std::fprintf(f,
-                   "fxaa = %d\ntexture_filtering = %d\ngpu_lane = %d\nmenu_music = %d\nps_buttons = %d\ndualsense = %d\n"
+                   "language = %d\nfxaa = %d\ntexture_filtering = %d\ngpu_lane = %d\nmenu_music = %d\nps_buttons = %d\ndualsense = %d\n"
                    "dualsense_strength = %d\nfps_counter = %d\nlightbar_effects = %d\nskip_intro = %d\n"
-                   "hd_cutscenes = %d\n",
-                   fxaa ? 1 : 0, filter, lane ? 1 : 0, music, ps_buttons ? 1 : 0, dualsense ? 1 : 0,
+                   "hd_cutscenes = %d\ncheat_menu = %d\ncheat_health = %d\ncheat_fuel = %d\n",
+                   kLanguages[language].xbox, fxaa ? 1 : 0, filter, lane ? 1 : 0, music, ps_buttons ? 1 : 0, dualsense ? 1 : 0,
                    dualsense_strength, fps_counter, lightbar_effects ? 1 : 0, skip_intro ? 1 : 0,
-                   hd_movies ? 1 : 0);
+                   hd_movies ? 1 : 0, cheat_menu ? 1 : 0, cheat_health ? 1 : 0, cheat_fuel ? 1 : 0);
       std::fclose(f);
     }
   }
@@ -220,6 +259,14 @@ struct Settings {
     rex::cvar::SetFlagByName("mgr_lightbar_effects", lightbar_effects ? "true" : "false");
     rex::cvar::SetFlagByName("mgr_skip_intro", skip_intro ? "true" : "false");
     rex::cvar::SetFlagByName("mgr_hd_movies", hd_movies ? "true" : "false");
+    rex::cvar::SetFlagByName("mgr_cheat_menu", cheat_menu ? "true" : "false");
+    rex::cvar::SetFlagByName("mgr_cheat_health", cheat_menu && cheat_health ? "true" : "false");
+    rex::cvar::SetFlagByName("mgr_cheat_fuel", cheat_menu && cheat_fuel ? "true" : "false");
+    const int xbox_language = kLanguages[language].xbox ? kLanguages[language].xbox : SystemLanguage();
+    rex::cvar::SetFlagByName("user_language", std::to_string(xbox_language));
+    REXLOG_INFO("Metal Gear Rising: Revengeance menu: language {} (Xbox 360 language {}), cheat menu {} (health "
+                "{}, fuel {})", kLanguages[language].name, xbox_language, cheat_menu ? "on" : "off",
+                cheat_menu && cheat_health ? "on" : "off", cheat_menu && cheat_fuel ? "on" : "off");
     REXLOG_INFO("Metal Gear Rising: Revengeance menu: anti-aliasing {}, texture filtering {}, the GPU's second lane {}, "
                 "{} button icons, DualSense features {} (strength {}), FPS counter {}",
                 fxaa ? "FXAA" : "off", kFilterNames[filter], lane ? "on" : "off", ps_buttons ? "PlayStation" : "Xbox",
@@ -282,7 +329,7 @@ const char* const kPageNames[kPages] = {"HOME", "CONTENT", "SAVES", "SETTINGS", 
 // The settings page's rows, in its order (a new option: a row here, its line
 // in SettingsLines and its change in ChangeSetting).
 enum SettingsRow {
-  kSkipIntro, kHdMovies, kButtons, kDualSense, kLightBar, kDualSenseStrength, kAntiAliasing, kFiltering, kLane, kFpsCounter, kMusic,
+  kLanguageRow, kSkipIntro, kHdMovies, kCheatMenu, kButtons, kDualSense, kLightBar, kDualSenseStrength, kAntiAliasing, kFiltering, kLane, kFpsCounter, kMusic,
   kSettingsRows
 };
 
@@ -526,6 +573,19 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     char music[16];
     std::snprintf(music, sizeof(music), "%d%%", settings_.music);
     std::vector<SettingLine> lines(kSettingsRows);
+    lines[kLanguageRow] = {"GAMEPLAY", "LANGUAGE",
+                           settings_.language ? std::string(kLanguages[settings_.language].name)
+                                              : std::string("AUTO (") +
+                                                    kLanguages[LanguageIndex(SystemLanguage())].name + ")",
+                           true,
+                           "The game's text, menus and subtitles: English, French, German, Italian or Spanish (the "
+                           "voices are English in all of them). AUTO follows the PS5's own language, or English when "
+                           "the game doesn't have it. Takes effect when you PLAY."};
+    lines[kCheatMenu] = {"GAMEPLAY", "CHEAT MENU", settings_.cheat_menu ? "ON" : "OFF", true,
+                         "While you play, press L3 + R3 together (both sticks in) to open the quick menu: "
+                         "INFINITE HEALTH, INFINITE FUEL CELLS (Blade Mode and Ripper Mode without end), the FPS "
+                         "counter and the DualSense features. O or L3 + R3 again closes it. OFF: L3 + R3 does "
+                         "nothing and the cheats are off."};
     lines[kSkipIntro] = {"GAMEPLAY", "SKIP INTRO", settings_.skip_intro ? "ON" : "OFF", true,
                          "Go straight to the title screen, without the Konami, Kojima Productions, PlatinumGames "
                          "and other logos at the start."};
@@ -581,6 +641,12 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     switch (row) {
       case kButtons:
         if (flip) settings_.ps_buttons = !settings_.ps_buttons;
+        break;
+      case kLanguageRow:
+        settings_.language = (settings_.language + (cross ? 1 : step) + kLanguageCount) % kLanguageCount;
+        break;
+      case kCheatMenu:
+        if (flip) settings_.cheat_menu = !settings_.cheat_menu;
         break;
       case kSkipIntro:
         if (flip) settings_.skip_intro = !settings_.skip_intro;

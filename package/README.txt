@@ -52,8 +52,15 @@ CONTENT   the game, Title Update 4 and the DLC: installed or not, X installs
           one from install/, triangle (twice) uninstalls it.
 SAVES     BACK UP SAVES (to install/backups/), IMPORT an Xbox 360 save
           package from install/, RESTORE one of the backups.
-SETTINGS  SKIP INTRO         no logos at the start (on).
+SETTINGS  LANGUAGE          the game's text and subtitles: English, French,
+                            German, Italian or Spanish. AUTO (the default)
+                            follows the PS5's language, English otherwise.
+          SKIP INTRO        no logos at the start (on).
           HD CUTSCENES      the HD cutscenes, when installed (see below).
+          CHEAT MENU        on: press L3 + R3 (both sticks in) while playing
+                            for the quick menu - INFINITE HEALTH, INFINITE
+                            FUEL CELLS, the FPS counter, the DualSense.
+                            O or L3 + R3 closes it.
           BUTTON ICONS      PlayStation (cross, circle, square, triangle, L1...)
                             or the Xbox 360's.
           DUALSENSE         the light bar follows Raiden's health, adaptive

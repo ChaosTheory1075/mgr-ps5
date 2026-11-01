@@ -31,6 +31,8 @@ REXCVAR_DEFINE_STRING(mgr_fps_counter, "off", "Metal Gear Rising",
 REXCVAR_DEFINE_BOOL(mgr_lightbar_effects, true, "Metal Gear Rising",
                     "The light bar flashes for hits and repairs and pulses in Ripper Mode and at low health "
                     "(off: it shows only the health)");
+REXCVAR_DECLARE(bool, mgr_cheat_health);
+REXCVAR_DECLARE(bool, mgr_cheat_fuel);
 
 namespace mgrps5 {
 
@@ -75,6 +77,9 @@ struct Guest {
   }
   uint32_t U32(uint32_t address) const {
     return rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual<uint8_t*>(address));
+  }
+  void Store32(uint32_t address, uint32_t value) const {
+    rex::memory::store_and_swap<uint32_t>(memory->TranslateVirtual<uint8_t*>(address), value);
   }
   float F32(uint32_t address) const {
     const uint32_t bits = U32(address);
@@ -226,7 +231,31 @@ void GameOverlay::Feedback() {
   health_ = p.health;
 }
 
+// The quick menu's cheats (mgr_quick_menu.h), once a frame on the player character: its health back to its
+// most, the fuel cells in use filled.
+static void ApplyCheats() {
+  const bool health = REXCVAR_GET(mgr_cheat_health), fuel = REXCVAR_GET(mgr_cheat_fuel);
+  if (!health && !fuel) return;
+  auto* kernel = REX_KERNEL_STATE();
+  if (!kernel || !kernel->memory()) return;
+  const Guest g{kernel->memory()};
+  const Player p = ReadPlayer(g);
+  if (!p.valid) return;
+  if (health && p.health > 0 && p.health < p.most) g.Store32(p.object + 0x870, uint32_t(p.most));
+  if (fuel) {
+    const uint32_t cells = g.U32(p.object + 0x3970), count = g.U32(p.object + 0x3978);
+    if (!count || count > 16 || !g.Readable(cells, count * 24)) return;
+    for (uint32_t i = 0; i < count; ++i) {
+      const uint32_t cell = cells + i * 24;
+      if (g.U32(cell + 0x14)) continue;
+      const float most = g.F32(cell + 0xC);
+      if (most > 0 && g.F32(cell + 4) < most) g.Store32(cell + 4, g.U32(cell + 0xC));
+    }
+  }
+}
+
 void GameOverlay::OnDraw(ImGuiIO& io) {
+  ApplyCheats();
   Feedback();
   const std::string mode = REXCVAR_GET(mgr_fps_counter);
   if (mode != "simple" && mode != "detailed") return;
