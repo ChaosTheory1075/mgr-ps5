@@ -137,3 +137,15 @@ large_function_threshold = 1048576
 # them (827818F0 is a thunk, b 82664170: "Call to invalid or unregistered function" on the PS5).
 "0x827617C0" = {}
 "0x827818F0" = {}
+
+# Virtual functions the analyzer merged into the function before them: each follows an unconditional
+# branch inside that function (a loop's b, so the scan above passed them by), and a vtable points at
+# it among registered functions. 82932EC0 (li r3,0x27; b 829F6D18, from 821DF860) crashed the game:
+# "Call to invalid or unregistered function at guest address 0x82932EC0" (mgr_008.log, 2026-11-01).
+"0x82628E58" = {}
+"0x828A5A70" = {}
+"0x82931D20" = {}
+"0x82932EC0" = {}
+"0x82934210" = {}
+"0x829415B0" = {}
+"0x830CE688" = {}

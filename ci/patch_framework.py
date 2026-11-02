@@ -94,15 +94,14 @@ def main():
     # (mgr_app.cpp).
     edit(io,
          "#include <rex/filesystem/device.h>\n",
-         "#include <cctype>\n#include <rex/cvar.h>\n#include <rex/filesystem/device.h>\n"
-         "REXCVAR_DECLARE(bool, mgr_hd_movies);  // [mgr] (mgr_app.cpp)\n")
+         "#include <cctype>\n#include <rex/cvar.h>\n#include <rex/filesystem/device.h>\n")
     edit(io,
          "u32 NtCreateFile_entry(mapped_u32 handle_out, u32 desired_access,\n",
          "namespace {\n"
          "// [mgr] moviehd:\\\\evXXXX.usm (the app's movie_hd/, mgr_app.cpp) for a cutscene movie's path\n"
-         "// (empty: not one)\n"
+         "// (empty: not one). mgr_hd_movies is the game's (mgr_app.cpp), looked up by name: the host\n"
+         "// codegen tool links this file without the game.\n"
          "std::string MgrHdMoviePath(const std::string& path) {\n"
-         "  if (!REXCVAR_GET(mgr_hd_movies)) return {};\n"
          "  std::string lower(path);\n"
          "  for (char& c : lower) c = char(std::tolower(static_cast<unsigned char>(c)));\n"
          "  const size_t name = lower.find_last_of(\"\\\\/\");\n"
@@ -111,6 +110,7 @@ def main():
          "      lower.compare(lower.size() - 4, 4, \".usm\") != 0) {\n"
          "    return {};\n"
          "  }\n"
+         "  if (rex::cvar::GetFlagByName(\"mgr_hd_movies\") != \"true\") return {};\n"
          "  return \"moviehd:\\\\\" + path.substr(name + 1);\n"
          "}\n"
          "}  // namespace\n"
