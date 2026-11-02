@@ -1256,6 +1256,65 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
          "            builder_->createTriOp(spv::OpBitFieldSExtract, type_int_, fetch_constant_word_3_signed,\n"
          "                                  builder_->makeUintConstant(13), builder_->makeUintConstant(6)));\n")
 
+    # Occlusion queries on the ACCURATE renderer (fragment shader interlock): the pixel shader does
+    # the depth / stencil test itself and only skips its EDRAM writes for failing samples, so the
+    # pixel stays alive and the host occlusion query counted every pixel drawn. The game's light
+    # flares test their visibility with queries: every flare showed through walls. Kill the pixel
+    # at the end of the shader (after its EDRAM writes) when no sample passed, as the console's
+    # depth test would: the query then counts only the samples that passed.
+    rb = sdk / "src" / "graphics" / "pipeline" / "shader" / "spirv_translator_rb.cpp"
+    edit(rb,
+         "void SpirvShaderTranslator::CompleteFragmentShaderInMain() {\n"
+         "  // Loaded if needed.\n"
+         "  spv::Id msaa_samples = spv::NoResult;\n",
+         "void SpirvShaderTranslator::CompleteFragmentShaderInMain() {\n"
+         "  // Loaded if needed.\n"
+         "  spv::Id msaa_samples = spv::NoResult;\n"
+         "\n"
+         "  // [mgr] Whether any sample passed the FSI depth / stencil test (occlusion queries).\n"
+         "  spv::Id var_fsi_any_sample_passed = spv::NoResult;\n"
+         "  if (edram_fragment_shader_interlock_) {\n"
+         "    var_fsi_any_sample_passed = builder_->createVariable(\n"
+         "        spv::NoPrecision, spv::StorageClassFunction, type_bool_,\n"
+         "        \"xe_var_fsi_any_sample_passed\", builder_->makeBoolConstant(false));\n"
+         "  }\n")
+    fsi_store_passed = (
+        "      builder_->createStore(\n"
+        "          builder_->createBinOp(\n"
+        "              spv::OpINotEqual, type_bool_,\n"
+        "              builder_->createBinOp(spv::OpBitwiseAnd, type_uint_, main_fsi_sample_mask_,\n"
+        "                                    builder_->makeUintConstant((uint32_t(1) << 4) - 1)),\n"
+        "              const_uint_0_),\n"
+        "          var_fsi_any_sample_passed);  // [mgr]\n")
+    edit(rb,
+         "    if (FSI_IsDepthStencilEarly()) {\n"
+         "      // Perform late depth / stencil writes for samples not discarded.\n",
+         "    if (FSI_IsDepthStencilEarly()) {\n" + fsi_store_passed +
+         "      // Perform late depth / stencil writes for samples not discarded.\n")
+    edit(rb,
+         "      FSI_DepthStencilTest(msaa_samples,\n"
+         "                           fsi_pixel_potentially_killed || (color_targets_written & 0b1));\n",
+         "      FSI_DepthStencilTest(msaa_samples,\n"
+         "                           fsi_pixel_potentially_killed || (color_targets_written & 0b1));\n"
+         + fsi_store_passed)
+    edit(rb,
+         "    builder_->createNoResultOp(spv::OpEndInvocationInterlockEXT);\n"
+         "  }\n"
+         "}\n",
+         "    builder_->createNoResultOp(spv::OpEndInvocationInterlockEXT);\n"
+         "\n"
+         "    // [mgr] Not counted by occlusion queries when every sample failed (see ci/patch_framework.py).\n"
+         "    SpirvBuilder::IfBuilder fsi_no_sample_passed_if(\n"
+         "        builder_->createUnaryOp(\n"
+         "            spv::OpLogicalNot, type_bool_,\n"
+         "            builder_->createLoad(var_fsi_any_sample_passed, spv::NoPrecision)),\n"
+         "        spv::SelectionControlDontFlattenMask, *builder_);\n"
+         "    builder_->createNoResultOp(spv::OpKill);\n"
+         "    // OpKill terminates the block.\n"
+         "    fsi_no_sample_passed_if.makeEndIf(false);\n"
+         "  }\n"
+         "}\n")
+
     # Where the GPU thread's time goes (include/rex/mgr_perf.h, from
     # fw-files): timers around the stalls and the big steps, printed per frame
     # every 10 s as "mgr perf". The framework's "ps5 timing" line only counts
