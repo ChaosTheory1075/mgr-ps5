@@ -167,17 +167,22 @@ int LanguageIndex(int xbox) {
 }
 
 // The PS5's language as the Xbox 360 numbers it; English for one the game doesn't have.
+// (asked once: the menu checks it every frame, and the PS5's language doesn't change while the app runs)
 int SystemLanguage() {
-  int v = 1;  // (English, US)
-  if (sceSystemServiceParamGetInt(1 /* SCE_SYSTEM_SERVICE_PARAM_ID_LANG */, &v) != 0) v = 1;
-  switch (v) {
-    case 2: case 22: return 4;  // French, French (Canada)
-    case 3: case 20: return 5;  // Spanish, Spanish (Latin America)
-    case 4: return 3;           // German
-    case 5: return 6;           // Italian
-    case 7: case 17: return 9;  // Portuguese, Portuguese (Brazil)
-    default: return 1;
-  }
+  static const int language = [] {
+    int v = 1;  // (English, US)
+    if (sceSystemServiceParamGetInt(1 /* SCE_SYSTEM_SERVICE_PARAM_ID_LANG */, &v) != 0) v = 1;
+    REXLOG_INFO("Metal Gear Rising: Revengeance menu: the PS5's language is {}", v);
+    switch (v) {
+      case 2: case 22: return 4;  // French, French (Canada)
+      case 3: case 20: return 5;  // Spanish, Spanish (Latin America)
+      case 4: return 3;           // German
+      case 5: return 6;           // Italian
+      case 7: case 17: return 9;  // Portuguese, Portuguese (Brazil)
+      default: return 1;
+    }
+  }();
+  return language;
 }
 
 struct Settings {
