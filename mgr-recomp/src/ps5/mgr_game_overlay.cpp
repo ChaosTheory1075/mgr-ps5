@@ -57,9 +57,9 @@ ImU32 RateColor(float ms) {
 //
 // The player character (Pl0000, the base of Raiden's and the DLC stories'
 // classes; sub_822B4198 constructs it): as the PC version's Pl0000 (the MGR
-// modding SDKs), which the Xbox 360's matches where it was checked -
-// BehaviorAppBase's health at +0x870 and its most at +0x874 (ints; Behavior
-// ends at 0x870 on both); Ripper Mode on at +0x3274 (EnableRipperMode,
+// modding SDKs) where it was checked, except the health: an int at +0x860 and
+// its most at +0x864 on the Xbox 360 (the PC's +0x870/+0x874; seen live in
+// Title Update 4 as 610 of 800 with the HUD at 76%); Ripper Mode on at +0x3274 (EnableRipperMode,
 // sub_82A83620, sets it, DisableRipperMode, sub_82A83720, clears it); the
 // fuel cells, an array of 24-byte entries at *(+0x3970), their count at
 // +0x3978: each one's fuel a float at +4, its most at +0xC, in use while
@@ -106,8 +106,8 @@ Player ReadPlayer(const Guest& g) {
     g_player_seen = object;
     g_player_vtable = 0;
   }
-  p.health = int32_t(g.U32(object + 0x870));
-  p.most = int32_t(g.U32(object + 0x874));
+  p.health = int32_t(g.U32(object + 0x860));
+  p.most = int32_t(g.U32(object + 0x864));
   if (p.most <= 0 || p.most > 1000000 || p.health < 0 || p.health > p.most) return p;
   if (!g_player_vtable) {
     g_player_vtable = vtable;
@@ -241,7 +241,7 @@ static void ApplyCheats() {
   const Guest g{kernel->memory()};
   const Player p = ReadPlayer(g);
   if (!p.valid) return;
-  if (health && p.health > 0 && p.health < p.most) g.Store32(p.object + 0x870, uint32_t(p.most));
+  if (health && p.health > 0 && p.health < p.most) g.Store32(p.object + 0x860, uint32_t(p.most));
   if (fuel) {
     const uint32_t cells = g.U32(p.object + 0x3970), count = g.U32(p.object + 0x3978);
     if (!count || count > 16 || !g.Readable(cells, count * 24)) return;
