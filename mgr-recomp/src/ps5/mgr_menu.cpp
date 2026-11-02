@@ -301,7 +301,7 @@ struct Settings {
     rex::cvar::SetFlagByName("mgr_cheat_fuel", cheat_menu && cheat_fuel ? "true" : "false");
     const int xbox_language = XboxLanguage();
     rex::cvar::SetFlagByName("user_language", std::to_string(xbox_language));
-    SetPortuguese(xbox_language == 9);  // (the quick menu's text)
+    SetLanguage(xbox_language);  // (the quick menu's and the trophy pop-up's text)
     REXLOG_INFO("Metal Gear Rising: Revengeance menu: language {} (Xbox 360 language {}), cheat menu {} (health "
                 "{}, fuel {})", kLanguages[language].name, xbox_language, cheat_menu ? "on" : "off",
                 cheat_menu && cheat_health ? "on" : "off", cheat_menu && cheat_fuel ? "on" : "off");
@@ -339,18 +339,26 @@ std::string Fit(ImFont* f, float size, std::string s, float width) {
   return s + "...";
 }
 
-// strftime's, with %a and %b in Portuguese while the menu is (the PS5's libc only has the C locale's English).
+// strftime's, with %a and %b in the menu's language (the PS5's libc only has the C locale's English).
 std::string Date(int64_t t, const char* format) {
   const std::time_t tt = std::time_t(t);
   const std::tm* tm = std::localtime(&tt);
   if (!tm) return {};
   std::string f = format;
-  if (Portuguese()) {
-    static constexpr const char* kDays[] = {"dom", "seg", "ter", "qua", "qui", "sex", "sáb"};
-    static constexpr const char* kMonths[] = {"jan", "fev", "mar", "abr", "mai", "jun",
-                                              "jul", "ago", "set", "out", "nov", "dez"};
-    for (size_t at; (at = f.find("%a")) != std::string::npos;) f.replace(at, 2, kDays[tm->tm_wday % 7]);
-    for (size_t at; (at = f.find("%b")) != std::string::npos;) f.replace(at, 2, kMonths[tm->tm_mon % 12]);
+  // (Portuguese, French, German, Italian, Spanish: Lang's order after English)
+  static constexpr const char* kDays[5][7] = {
+      {"dom", "seg", "ter", "qua", "qui", "sex", "sáb"}, {"dim", "lun", "mar", "mer", "jeu", "ven", "sam"},
+      {"So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"},        {"dom", "lun", "mar", "mer", "gio", "ven", "sab"},
+      {"dom", "lun", "mar", "mié", "jue", "vie", "sáb"}};
+  static constexpr const char* kMonths[5][12] = {
+      {"jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"},
+      {"janv", "févr", "mars", "avr", "mai", "juin", "juil", "août", "sept", "oct", "nov", "déc"},
+      {"Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"},
+      {"gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"},
+      {"ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"}};
+  if (const int l = int(TextLanguage()); l > 0) {
+    for (size_t at; (at = f.find("%a")) != std::string::npos;) f.replace(at, 2, kDays[l - 1][tm->tm_wday % 7]);
+    for (size_t at; (at = f.find("%b")) != std::string::npos;) f.replace(at, 2, kMonths[l - 1][tm->tm_mon % 12]);
   }
   char out[64] = {};
   std::strftime(out, sizeof(out), f.c_str(), tm);
@@ -375,7 +383,7 @@ enum Page { kHome, kContent, kSaves, kSettings, kTrophies, kCredits, kPages };
 const char* PageName(int page) {
   static constexpr const char* kEn[kPages] = {"HOME", "CONTENT", "SAVES", "SETTINGS", "TROPHIES", "CREDITS"};
   static constexpr const char* kPt[kPages] = {"INÍCIO", "CONTEÚDO", "SAVES", "AJUSTES", "TROFÉUS", "CRÉDITOS"};
-  return (Portuguese() ? kPt : kEn)[page];
+  return T(kEn[page], kPt[page]);
 }
 
 // The settings page's rows, in its order (a new option: a row here, its line
@@ -421,7 +429,7 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     const float dt = std::min(io.DeltaTime, 0.1f);
     time_ += dt;
     pictures_this_frame_ = 0;
-    SetPortuguese(settings_.XboxLanguage() == 9);  // (the menu's text follows LANGUAGE as it changes)
+    SetLanguage(settings_.XboxLanguage());  // (the menu's text follows LANGUAGE as it changes)
     HandlePad(pad_.Pressed());
     TickInstaller();
     if (music_) music_->SetVolume(leaving_ ? 0.0f : settings_.music / 100.0f);
@@ -662,14 +670,13 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
                                               : std::string("AUTO (") +
                                                     language_name(LanguageIndex(SystemLanguage())) + ")",
                            true,
-                           T("The game's text, menus and subtitles - and this menu's, in Portuguese: English, French, "
-                             "German, Italian, Spanish or Portuguese (Brazil) (the voices are English in all of them). "
-                             "AUTO follows the PS5's own language, or English when the game doesn't have it. The game "
+                           T("The game's text, menus and subtitles, and this menu's: English, French, German, "
+                             "Italian, Spanish or Portuguese (Brazil) (the voices are English in all of them). AUTO "
+                             "follows the PS5's own language, or English when the game doesn't have it. The game "
                              "takes it when you PLAY.",
-                             "Os textos, menus e legendas do jogo - e deste menu, em português: inglês, francês, "
-                             "alemão, italiano, espanhol ou português (Brasil) (as vozes são em inglês em todos). AUTO "
-                             "segue o idioma do PS5, ou inglês quando o jogo não o tem. O jogo o usa quando você "
-                             "JOGAR.")};
+                             "Os textos, menus e legendas do jogo, e os deste menu: inglês, francês, alemão, "
+                             "italiano, espanhol ou português (Brasil) (as vozes são em inglês em todos). AUTO segue o "
+                             "idioma do PS5, ou inglês quando o jogo não o tem. O jogo o usa quando você JOGAR.")};
     lines[kCheatMenu] = {game, T("CHEAT MENU (L3 + R3)", "TRAPAÇAS (L3 + R3)"), settings_.cheat_menu ? on : off, true,
                          T("While you play, press L3 + R3 together (both sticks in) to open the quick menu: "
                            "INFINITE HEALTH, INFINITE FUEL CELLS (Blade Mode and Ripper Mode without end), the FPS "
@@ -1496,9 +1503,11 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     const float dx = px + (1 - detail_in_) * 14 * u;
     Icon(dl, it, dx, py, 112 * u, da);
     const trophies::Grade g = GradeOf(it);
-    static constexpr const char* kGradesPt[] = {"BRONZE", "PRATA", "OURO", "PLATINA"};  // (trophies::Grade's order)
-    const std::string grade = Portuguese() ? std::string("TROFÉU DE ") + kGradesPt[int(g) & 3]
-                                           : Upper(std::string(trophies::GradeName(g)) + " trophy");
+    // (trophies::Grade's order)
+    static constexpr const char* kGrades[] = {"BRONZE TROPHY", "SILVER TROPHY", "GOLD TROPHY", "PLATINUM TROPHY"};
+    static constexpr const char* kGradesPt[] = {"TROFÉU DE BRONZE", "TROFÉU DE PRATA", "TROFÉU DE OURO",
+                                                "TROFÉU DE PLATINA"};
+    const std::string grade = T(kGrades[int(g) & 3], kGradesPt[int(g) & 3]);
     dl->AddText(g_body, 20 * u, ImVec2(dx + 136 * u, py + 8 * u), trophies::GradeColor(g, da), grade.c_str());
     dl->AddText(g_item, 36 * u, ImVec2(dx + 136 * u, py + 34 * u), A(kWhite, da), NameOf(it).c_str(), nullptr,
                 pw - 136 * u);

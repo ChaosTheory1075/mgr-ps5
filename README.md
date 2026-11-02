@@ -21,7 +21,7 @@ the Xbox 360.
   stronger rumble
 - A cheat quick menu: L3 + R3 in game for Infinite Health and Infinite Fuel Cells
 - English, French, German, Italian, Spanish or Portuguese (Brazil) text, or the PS5's own language;
-  in Portuguese the menu, the quick menu and the trophy pop-ups are in Portuguese too
+  the menu, the quick menu and the trophy pop-ups follow it too
 - FSR 1 upscaling to 4K with a sharpness setting, SMAA or FXAA, anisotropic filtering (2x to 16x), an
   FPS counter, Skip Intro and an experimental FAST renderer
 - The DLC: Jetstream, Blade Wolf, the VR Mission Expansion and the costumes

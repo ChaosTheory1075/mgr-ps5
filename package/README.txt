@@ -71,8 +71,8 @@ SETTINGS  GRAPHICS
           LANGUAGE          the game's text and subtitles: English, French,
                             German, Italian, Spanish or Portuguese (Brazil).
                             AUTO (the default) follows the PS5's language,
-                            English otherwise. In Portuguese this menu, the
-                            quick menu and the trophy pop-ups are too.
+                            English otherwise. This menu, the quick menu and
+                            the trophy pop-ups follow it too.
           SKIP INTRO        no logos at the start (on).
           HD CUTSCENES      the HD cutscenes, when installed (see below).
           CHEAT MENU        on: press L3 + R3 (both sticks in) while playing
