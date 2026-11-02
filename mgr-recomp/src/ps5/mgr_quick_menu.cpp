@@ -25,6 +25,7 @@
 #include <rex/logging.h>
 
 #include "mgr_menu.h"
+#include "mgr_text.h"
 
 REXCVAR_DEFINE_BOOL(mgr_cheat_menu, true, "Metal Gear Rising",
                     "L3 + R3 opens the quick menu over the game: the cheats, the FPS counter, the DualSense");
@@ -99,12 +100,14 @@ enum RowId { kHealth, kFuel, kCounter, kDualSense, kRows };
 struct Row {
   const char* section;  // a heading over the row, or nullptr
   const char* label;
+  const char* section_pt;  // (the two in Portuguese: mgr_text.h)
+  const char* label_pt;
 };
 constexpr Row kRowInfo[kRows] = {
-    {"CHEATS", "Infinite Health"},
-    {nullptr, "Infinite Fuel Cells"},
-    {"DISPLAY", "FPS Counter"},
-    {"CONTROLLER", "DualSense Features"},
+    {"CHEATS", "Infinite Health", "TRAPAÇAS", "Vida Infinita"},
+    {nullptr, "Infinite Fuel Cells", nullptr, "Células de Energia Infinitas"},
+    {"DISPLAY", "FPS Counter", "TELA", "Contador de FPS"},
+    {"CONTROLLER", "DualSense Features", "CONTROLE", "Recursos do DualSense"},
 };
 
 int CounterMode() {
@@ -113,11 +116,14 @@ int CounterMode() {
 }
 
 std::string ValueOf(int row) {
+  const char* on = T("ON", "LIGADO");
+  const char* off = T("OFF", "DESLIGADO");
   switch (row) {
-    case kHealth: return REXCVAR_GET(mgr_cheat_health) ? "ON" : "OFF";
-    case kFuel: return REXCVAR_GET(mgr_cheat_fuel) ? "ON" : "OFF";
-    case kCounter: return CounterMode() == 2 ? "DETAILED" : CounterMode() == 1 ? "SIMPLE" : "OFF";
-    default: return rex::input::sony::GetOptions().enabled ? "ON" : "OFF";
+    case kHealth: return REXCVAR_GET(mgr_cheat_health) ? on : off;
+    case kFuel: return REXCVAR_GET(mgr_cheat_fuel) ? on : off;
+    case kCounter:
+      return CounterMode() == 2 ? T("DETAILED", "DETALHADO") : CounterMode() == 1 ? T("SIMPLE", "SIMPLES") : off;
+    default: return rex::input::sony::GetOptions().enabled ? on : off;
   }
 }
 
@@ -224,13 +230,13 @@ void QuickMenu::OnDraw(ImGuiIO& io) {
   dl->AddRectFilled(ImVec2(0, 0), size, Fade(IM_COL32(0, 0, 0, 110), a));
   dl->AddRectFilled(ImVec2(x, y0), ImVec2(x + w, y0 + h), Fade(IM_COL32(8, 8, 10, 235), a), 10 * u);
   dl->AddRectFilled(ImVec2(x, y0), ImVec2(x + 8 * u, y0 + h), Fade(kRed, a), 10 * u, ImDrawFlags_RoundCornersLeft);
-  dl->AddText(item, 46 * u, ImVec2(x + 40 * u, y0 + 26 * u), Fade(kWhite, a), "QUICK MENU");
+  dl->AddText(item, 46 * u, ImVec2(x + 40 * u, y0 + 26 * u), Fade(kWhite, a), T("QUICK MENU", "MENU RÁPIDO"));
   float y = y0 + 100 * u;
   for (int i = 0; i < kRows; ++i) {
     const Row& r = kRowInfo[i];
     if (r.section) {
       y += 10 * u;
-      dl->AddText(body, 20 * u, ImVec2(x + 40 * u, y), Fade(kRed, a), r.section);
+      dl->AddText(body, 20 * u, ImVec2(x + 40 * u, y), Fade(kRed, a), T(r.section, r.section_pt));
       dl->AddRectFilled(ImVec2(x + 40 * u, y + 28 * u), ImVec2(x + w - 40 * u, y + 29 * u),
                         Fade(IM_COL32(255, 255, 255, 40), a));
       y += head_h - 10 * u;
@@ -239,14 +245,15 @@ void QuickMenu::OnDraw(ImGuiIO& io) {
     if (sel)
       dl->AddRectFilled(ImVec2(x + 24 * u, y + 2 * u), ImVec2(x + w - 24 * u, y + row_h - 2 * u),
                         Fade(IM_COL32(196, 22, 28, 50), a), 4 * u);
-    dl->AddText(item, 28 * u, ImVec2(x + 40 * u, y + 5 * u), Fade(sel ? kWhite : kGrey, a), r.label);
+    dl->AddText(item, 28 * u, ImVec2(x + 40 * u, y + 5 * u), Fade(sel ? kWhite : kGrey, a), T(r.label, r.label_pt));
     const std::string v = sel ? "<  " + ValueOf(i) + "  >" : ValueOf(i);
     const float vw = item->CalcTextSizeA(28 * u, FLT_MAX, 0, v.c_str()).x;
     dl->AddText(item, 28 * u, ImVec2(x + w - 40 * u - vw, y + 5 * u), Fade(sel ? kRed : kGrey, a), v.c_str());
     y += row_h;
   }
   dl->AddText(body, 20 * u, ImVec2(x + 40 * u, y0 + h - 46 * u), Fade(kGrey, a),
-              "UP DOWN  MOVE      LEFT RIGHT / X  CHANGE      O / L3+R3  CLOSE");
+              T("UP DOWN  MOVE      LEFT RIGHT / X  CHANGE      O / L3+R3  CLOSE",
+                "CIMA BAIXO  MOVER      ESQ. DIR. / X  MUDAR      O / L3+R3  FECHAR"));
 }
 
 void StartQuickMenu(rex::ui::ImGuiDrawer* drawer) {

@@ -1,6 +1,7 @@
 // Metal Gear Rising: Revengeance RePlatinum (PS5) - see mgr_install.h. Crackdown PS5's
 // cd_install.cpp (by way of Max Payne 3 RePrescribed's), for the disc, Title Update 4 and any number of DLC packs.
 #include "mgr_install.h"
+#include "mgr_text.h"
 #if REX_PLATFORM_PS5
 
 #include <algorithm>
@@ -239,7 +240,7 @@ class Copier {
     gta4::install::io::OutFile out;
     if (!out.Open(dest, &gather_, size)) {
       in->Destroy();
-      error = "couldn't write " + dest.string() + " (is the drive full?)";
+      error = T("couldn't write ", "não deu para gravar ") + dest.string() + T(" (is the drive full?)", " (o disco está cheio?)");
       return false;
     }
     size_t offset = 0;
@@ -263,7 +264,7 @@ class Copier {
     }
     const bool ok = out.Close() && written && offset == size;
     in->Destroy();
-    if (!ok) error = "couldn't copy " + e->path() + " (is the drive full?)";
+    if (!ok) error = T("couldn't copy ", "não deu para copiar ") + e->path() + T(" (is the drive full?)", " (o disco está cheio?)");
     return ok;
   }
 
@@ -333,7 +334,8 @@ bool EnoughSpace(const fs::path& app, uint64_t need, std::string& error) {
   std::error_code ec;
   const auto space = fs::space(app, ec);
   if (!ec && space.available < need + (256ull << 20)) {
-    error = "Not enough free space: it needs " + Gb(need) + ", the drive has " + Gb(space.available) + ".";
+    error = T("Not enough free space: it needs ", "Espaço livre insuficiente: precisa de ") + Gb(need) +
+            T(", the drive has ", ", o disco tem ") + Gb(space.available) + ".";
     return false;
   }
   return true;
@@ -602,7 +604,7 @@ bool TakeStaged(const fs::path& app, const std::string& rel, const fs::path& to,
   ec.clear();
   fs::rename(Staging(app) / rel, to, ec);
   if (ec) {
-    error = "couldn't move the installed files into place (" + ec.message() + ")";
+    error = T("couldn't move the installed files into place (", "não deu para mover os arquivos instalados para o lugar (") + ec.message() + ")";
     return false;
   }
   fs::remove_all(Staging(app), ec);
@@ -738,7 +740,7 @@ std::vector<Source> Scan(const fs::path& app) {
       }
       if (!FindChild(p, "default.xex").empty()) {
         Source s{Kind::kGameFolder, p, p.filename().string() + "/"};
-        if (!IsGameFolder(p)) s.kind = Kind::kOther, s.label += "  (not Metal Gear Rising: Revengeance's disc)";
+        if (!IsGameFolder(p)) s.kind = Kind::kOther, s.label += T("  (not Metal Gear Rising: Revengeance's disc)", "  (não é o disco de Metal Gear Rising: Revengeance)");
         out.push_back(s);
         it.disable_recursion_pending();
       } else if (it.depth() >= 4) {
@@ -752,17 +754,17 @@ std::vector<Source> Scan(const fs::path& app) {
     if (ext == ".iso" || ext == ".xiso") {
       out.push_back({Kind::kGameImage, p, file});
     } else if (ext == ".usm") {
-      out.push_back({Kind::kCutscenes, p, "HD cutscene " + MovieName(file)});
+      out.push_back({Kind::kCutscenes, p, T("HD cutscene ", "cena em HD ") + MovieName(file)});
     } else if (ext == ".zip" && !ZipMovies(p).empty()) {
-      out.push_back({Kind::kCutscenes, p, "HD cutscenes: " + file});
+      out.push_back({Kind::kCutscenes, p, T("HD cutscenes: ", "cenas em HD: ") + file});
     } else if (IsCutsceneEvents(p)) {
-      out.push_back({Kind::kOther, p, file + "  (the HD cutscenes' event files: not needed, deleted)"});
+      out.push_back({Kind::kOther, p, file + T("  (the HD cutscenes' event files: not needed, deleted)", "  (arquivos de eventos das cenas em HD: desnecessários, apagados)")});
     } else if (ext == ".7z" || ext == ".rar" || ext == ".zip" || ext == ".001" || ext == ".gz" || ext == ".tar") {
       out.push_back({Kind::kArchive, p, file});
     } else if (IsPackage(p)) {
       Header h;
       if (!ReadHeader(p, h) || h.title != kTitleId) {
-        out.push_back({Kind::kOther, p, file + "  (not a Metal Gear Rising: Revengeance package)"});
+        out.push_back({Kind::kOther, p, file + T("  (not a Metal Gear Rising: Revengeance package)", "  (não é um pacote de Metal Gear Rising: Revengeance)")});
         continue;
       }
       const std::string name = Narrow(h.name);
@@ -825,7 +827,7 @@ bool Job::Start(std::string title, F&& work) {
     try {
       ok = work(result);
     } catch (const std::exception& e) {
-      result = std::string("Failed: ") + e.what();
+      result = std::string(T("Failed: ", "Falhou: ")) + e.what();
     }
     REXLOG_INFO("Metal Gear Rising: Revengeance install: {} {}", ok ? "done:" : "FAILED:", result);
     {
@@ -845,19 +847,19 @@ bool Job::Install(const fs::path& app, const Source& source) {
   switch (source.kind) {
     case Kind::kGameImage:
     case Kind::kGameFolder:
-      return Start("Installing the game from " + source.label, [this, app, source](std::string& result) {
+      return Start(T("Installing the game from ", "Instalando o jogo de ") + source.label, [this, app, source](std::string& result) {
         std::error_code ec;
         const fs::path tmp = app / "game.installing";
         fs::remove_all(tmp, ec);
         if (source.kind == Kind::kGameImage) {
           rex::filesystem::DiscImageDevice disc("\\Device\\MgrInstall", source.path);
           if (!disc.Initialize()) {
-            result = source.label + " isn't an Xbox 360 disc image.";
+            result = source.label + T(" isn't an Xbox 360 disc image.", " não é uma imagem de disco de Xbox 360.");
             return false;
           }
           rex::filesystem::Entry* root = disc.ResolvePath("");
           if (!root) {
-            result = "Couldn't read " + source.label + ".";
+            result = T("Couldn't read ", "Não deu para ler ") + source.label + ".";
             return false;
           }
           total_ = TotalSize(root);
@@ -878,7 +880,7 @@ bool Job::Install(const fs::path& app, const Source& source) {
             ok = Copier(done_).Children(root, tmp, error);
           if (!ok) {
             fs::remove_all(tmp, ec);
-            result = "Installing from " + source.label + " failed: " + error;
+            result = T("Installing from ", "A instalação de ") + source.label + T(" failed: ", " falhou: ") + error;
             return false;
           }
           // (the disc's console system update isn't the game's: the payload copies it too)
@@ -887,7 +889,7 @@ bool Job::Install(const fs::path& app, const Source& source) {
         } else {
           fs::rename(source.path, tmp, ec);
           if (ec) {
-            result = "Couldn't move " + source.label + " (" + ec.message() + ").";
+            result = T("Couldn't move ", "Não deu para mover ") + source.label + " (" + ec.message() + ").";
             return false;
           }
           // (the disc's console system update isn't the game's)
@@ -901,7 +903,8 @@ bool Job::Install(const fs::path& app, const Source& source) {
           } else {
             fs::remove_all(tmp, ec);
           }
-          result = source.label + " isn't Metal Gear Rising: Revengeance's disc (its default.xex is another game's).";
+          result = source.label + T(" isn't Metal Gear Rising: Revengeance's disc (its default.xex is another game's).",
+                                    " não é o disco de Metal Gear Rising: Revengeance (o default.xex dele é de outro jogo).");
           return false;
         }
         const fs::path game = app / kGameFolder;
@@ -913,22 +916,22 @@ bool Job::Install(const fs::path& app, const Source& source) {
         fs::remove_all(game, ec);
         fs::rename(tmp, game, ec);
         if (ec) {
-          result = "Couldn't put the game in place (" + ec.message() + ").";
+          result = T("Couldn't put the game in place (", "Não deu para colocar o jogo no lugar (") + ec.message() + ").";
           return false;
         }
         if (source.kind == Kind::kGameImage) Leftover(source.path);
-        result = "The game is installed.";
+        result = T("The game is installed.", "O jogo está instalado.");
         return true;
       });
     case Kind::kUpdate:
-      return Start("Installing " + source.label, [this, app, source](std::string& result) {
+      return Start(T("Installing ", "Instalando ") + source.label, [this, app, source](std::string& result) {
         std::error_code ec;
         const fs::path tmp = app / "update.installing";
         fs::remove_all(tmp, ec);
         rex::filesystem::StfsContainerDevice package("\\Device\\MgrUpdate", source.path);
         rex::filesystem::Entry* root = package.Initialize() ? package.ResolvePath("") : nullptr;
         if (!root) {
-          result = "Couldn't read " + source.label + ".";
+          result = T("Couldn't read ", "Não deu para ler ") + source.label + ".";
           return false;
         }
         total_ = TotalSize(root);
@@ -937,14 +940,15 @@ bool Job::Install(const fs::path& app, const Source& source) {
         const bool copied = ran == Ran::kDone || (ran == Ran::kUnavailable && Copier(done_).Children(root, tmp, error));
         if (!copied) {
           fs::remove_all(tmp, ec);
-          result = "Installing " + source.label + " failed: " + error;
+          result = T("Installing ", "A instalação de ") + source.label + T(" failed: ", " falhou: ") + error;
           return false;
         }
         // default.xexp (the patch) beside default.xex, the rest (patch_data/) as the game's update/
         const fs::path xexp = FindChild(tmp, "default.xexp");
         if (xexp.empty() || fs::file_size(xexp, ec) != kUpdateXexpSize) {
           fs::remove_all(tmp, ec);
-          result = source.label + " isn't Title Update 4, which Metal Gear Rising: Revengeance RePlatinum needs.";
+          result = source.label + T(" isn't Title Update 4, which Metal Gear Rising: Revengeance RePlatinum needs.",
+                                    " não é a Title Update 4, de que Metal Gear Rising: Revengeance RePlatinum precisa.");
           return false;
         }
         const fs::path game = app / kGameFolder;
@@ -957,19 +961,19 @@ bool Job::Install(const fs::path& app, const Source& source) {
         fs::rename(tmp, game / "update", ec);
         if (ec) {
           fs::remove_all(tmp, ec);
-          result = "Couldn't put the title update in place (" + ec.message() + ").";
+          result = T("Couldn't put the title update in place (", "Não deu para colocar a atualização no lugar (") + ec.message() + ").";
           return false;
         }
         Leftover(source.path);
-        result = "Title Update 4 is installed.";
+        result = T("Title Update 4 is installed.", "A Title Update 4 está instalada.");
         return true;
       });
     case Kind::kDlc:
-      return Start("Installing " + source.label, [this, app, source](std::string& result) {
+      return Start(T("Installing ", "Instalando ") + source.label, [this, app, source](std::string& result) {
         std::error_code ec;
         const std::string name = ContentName(source.path);
         if (name.empty()) {
-          result = "Couldn't read " + source.label + ".";
+          result = T("Couldn't read ", "Não deu para ler ") + source.label + ".";
           return false;
         }
         const fs::path dest = app / "dlc" / name;
@@ -978,7 +982,7 @@ bool Job::Install(const fs::path& app, const Source& source) {
         rex::filesystem::StfsContainerDevice package("\\Device\\MgrDlc", source.path);
         rex::filesystem::Entry* root = package.Initialize() ? package.ResolvePath("") : nullptr;
         if (!root) {
-          result = "Couldn't read " + source.label + ".";
+          result = T("Couldn't read ", "Não deu para ler ") + source.label + ".";
           return false;
         }
         total_ = TotalSize(root);
@@ -988,21 +992,21 @@ bool Job::Install(const fs::path& app, const Source& source) {
         const bool copied = ran == Ran::kDone || (ran == Ran::kUnavailable && Copier(done_).Children(root, tmp, error));
         if (!copied) {
           fs::remove_all(tmp, ec);
-          result = "Installing " + source.label + " failed: " + error;
+          result = T("Installing ", "A instalação de ") + source.label + T(" failed: ", " falhou: ") + error;
           return false;
         }
         fs::remove_all(dest, ec);
         fs::rename(tmp, dest, ec);
         if (ec) {
-          result = "Couldn't put the DLC in place (" + ec.message() + ").";
+          result = T("Couldn't put the DLC in place (", "Não deu para colocar a DLC no lugar (") + ec.message() + ").";
           return false;
         }
         Leftover(source.path);
-        result = source.label + " is installed.";
+        result = source.label + T(" is installed.", " está instalado.");
         return true;
       });
     case Kind::kCutscenes:
-      return Start("Installing the " + source.label, [this, app, source](std::string& result) {
+      return Start(T("Installing the ", "Instalando as ") + source.label, [this, app, source](std::string& result) {
         std::error_code ec;
         const fs::path movies = app / kMoviesFolder;
         fs::create_directories(movies, ec);
@@ -1023,17 +1027,17 @@ bool Job::Install(const fs::path& app, const Source& source) {
           ec.clear();
           fs::rename(source.path, dest, ec);
           if (ec) {
-            result = "Couldn't move the " + source.label + " into movie_hd/ (" + ec.message() + ").";
+            result = T("Couldn't move the ", "Não deu para mover as ") + source.label + T(" into movie_hd/ (", " para movie_hd/ (") + ec.message() + ").";
             return false;
           }
           drop_events();
-          result = "Installed the " + source.label + ".";
+          result = T("Installed the ", "Instaladas as ") + source.label + ".";
           return true;
         }
         std::string error;
         const auto entries = ZipMovies(source.path, &error);
         if (entries.empty()) {
-          result = source.path.filename().string() + " couldn't be read" + (error.empty() ? "" : " (" + error + ")") + ".";
+          result = source.path.filename().string() + T(" couldn't be read", " não pôde ser lido") + (error.empty() ? "" : " (" + error + ")") + ".";
           return false;
         }
         uint64_t size = 0;
@@ -1049,7 +1053,7 @@ bool Job::Install(const fs::path& app, const Source& source) {
                                                 done_, total_, error);
         if (ran == Ran::kFailed) {
           fs::remove_all(Staging(app), ec);
-          result = "Installing the " + source.label + " failed: " + error;
+          result = T("Installing the ", "A instalação das ") + source.label + T(" failed: ", " falhou: ") + error;
           return false;
         }
         int count = 0;
@@ -1063,7 +1067,7 @@ bool Job::Install(const fs::path& app, const Source& source) {
             e2.clear();
             fs::rename(it->path(), dest, e2);
             if (e2) {
-              result = "Couldn't move the HD cutscenes into movie_hd/ (" + e2.message() + ").";
+              result = T("Couldn't move the HD cutscenes into movie_hd/ (", "Não deu para mover as cenas em HD para movie_hd/ (") + e2.message() + ").";
               fs::remove_all(Staging(app), e2);
               return false;
             }
@@ -1074,7 +1078,7 @@ bool Job::Install(const fs::path& app, const Source& source) {
           // no payload loader: unpacked here (slowly: the PS5 slows an app's writing down)
           recomp::unzip::Archive archive;
           if (!archive.open(source.path.string(), error)) {
-            result = source.path.filename().string() + " couldn't be read (" + error + ").";
+            result = source.path.filename().string() + T(" couldn't be read (", " não pôde ser lido (") + error + ").";
             return false;
           }
           gta4::install::io::AlignedBuffer gather;
@@ -1082,7 +1086,7 @@ bool Job::Install(const fs::path& app, const Source& source) {
             const fs::path dest = movies / MovieName(e.name), tmp = dest.string() + ".installing";
             gta4::install::io::OutFile out;
             if (!out.Open(tmp, &gather, e.size)) {
-              result = "Couldn't write movie_hd/" + MovieName(e.name) + " (is the drive full?).";
+              result = T("Couldn't write movie_hd/", "Não deu para gravar movie_hd/") + MovieName(e.name) + T(" (is the drive full?).", " (o disco está cheio?).");
               return false;
             }
             bool wrote = true;
@@ -1097,8 +1101,9 @@ bool Job::Install(const fs::path& app, const Source& source) {
             const bool closed = out.Close();
             if (!read || !wrote || !closed) {
               fs::remove(tmp, ec);
-              result = "Installing the " + source.label + " failed: " +
-                       (!wrote || !closed ? "couldn't write movie_hd/" + MovieName(e.name) + " (is the drive full?)"
+              result = T("Installing the ", "A instalação das ") + source.label + T(" failed: ", " falhou: ") +
+                       (!wrote || !closed ? T("couldn't write movie_hd/", "não deu para gravar movie_hd/") + MovieName(e.name) +
+                                                T(" (is the drive full?)", " (o disco está cheio?)")
                                           : error);
               return false;
             }
@@ -1110,12 +1115,12 @@ bool Job::Install(const fs::path& app, const Source& source) {
         }
         RemoveSource(source.path);
         drop_events();
-        result = "Installed " + std::to_string(count) + " HD cutscenes from " + source.path.filename().string() +
-                 " (and deleted it).";
+        result = T("Installed ", "Instaladas ") + std::to_string(count) + T(" HD cutscenes from ", " cenas em HD de ") +
+                 source.path.filename().string() + T(" (and deleted it).", " (e o arquivo foi apagado).");
         return true;
       });
     case Kind::kSave:
-      return Start("Importing the save " + source.label, [this, app, source](std::string& result) {
+      return Start(T("Importing the save ", "Importando o save ") + source.label, [this, app, source](std::string& result) {
         std::error_code ec;
         // Into saves/_import/, moved into the game's profile when it starts (PlacePendingSaves): the
         // runtime makes its profile (a random XUID, its saves' folder) on its first start, so an
@@ -1135,14 +1140,14 @@ bool Job::Install(const fs::path& app, const Source& source) {
         rex::filesystem::StfsContainerDevice package("\\Device\\MgrSave", source.path);
         rex::filesystem::Entry* root = package.Initialize() ? package.ResolvePath("") : nullptr;
         if (!root || h.title != kTitleId) {
-          result = "Couldn't read the save " + source.label + ".";
+          result = T("Couldn't read the save ", "Não deu para ler o save ") + source.label + ".";
           return false;
         }
         total_ = TotalSize(root);
         std::string error;
         if (!Copier(done_).Children(root, tmp, error)) {
           fs::remove_all(tmp, ec);
-          result = "Importing " + source.label + " failed: " + error;
+          result = T("Importing ", "A importação de ") + source.label + T(" failed: ", " falhou: ") + error;
           return false;
         }
         fs::remove_all(dest, ec);
@@ -1161,24 +1166,25 @@ bool Job::Install(const fs::path& app, const Source& source) {
         std::ofstream(headers / (name + ".header"), std::ios::binary)
             .write(reinterpret_cast<const char*>(&data), sizeof(data));
         RemoveSource(source.path);
-        result = "Imported the save " + source.label + " as " + name + ". The game loads it when you PLAY.";
+        result = T("Imported the save ", "Save importado: ") + source.label + T(" as ", ", como ") + name +
+                 T(". The game loads it when you PLAY.", ". O jogo o carrega quando você JOGAR.");
         return true;
       });
     case Kind::kBackup:
-      return Start("Restoring " + source.label, [app, source](std::string& result) {
+      return Start(T("Restoring ", "Restaurando ") + source.label, [app, source](std::string& result) {
         std::error_code ec;
         const auto options = fs::copy_options::recursive | fs::copy_options::overwrite_existing;
         for (const char* what : {"saves", "UserData"}) {
           if (!fs::exists(source.path / what, ec)) continue;
           fs::copy(source.path / what, app / what, options, ec);
           if (ec) {
-            result = "Restoring " + source.label + " failed (" + ec.message() + ").";
+            result = T("Restoring ", "A restauração de ") + source.label + T(" failed (", " falhou (") + ec.message() + ").";
             return false;
           }
         }
         if (fs::exists(source.path / "menu.ini", ec))
           fs::copy_file(source.path / "menu.ini", app / "menu.ini", fs::copy_options::overwrite_existing, ec);
-        result = "Restored the backup " + source.label + ".";
+        result = T("Restored the backup ", "Backup restaurado: ") + source.label + ".";
         return true;
       });
     default:
@@ -1187,10 +1193,10 @@ bool Job::Install(const fs::path& app, const Source& source) {
 }
 
 bool Job::Uninstall(const fs::path& app, Remove what) {
-  const char* name = what == Remove::kGame     ? "the game"
+  const char* name = what == Remove::kGame     ? T("the game", "o jogo")
                      : what == Remove::kUpdate ? "Title Update 4"
-                                               : "the DLC";
-  return Start(std::string("Removing ") + name, [app, what, name](std::string& result) {
+                                               : T("the DLC", "as DLCs");
+  return Start(std::string(T("Removing ", "Removendo ")) + name, [app, what, name](std::string& result) {
     std::error_code ec;
     const fs::path game = app / kGameFolder;
     switch (what) {
@@ -1214,13 +1220,13 @@ bool Job::Uninstall(const fs::path& app, Remove what) {
         fs::create_directories(app / "dlc", ec);
         break;
     }
-    result = std::string("Removed ") + name + ".";
+    result = std::string(T("Removed ", "Removido: ")) + name + ".";
     return !ec;
   });
 }
 
 bool Job::Backup(const fs::path& app) {
-  return Start("Backing up the saves", [app](std::string& result) {
+  return Start(T("Backing up the saves", "Fazendo backup dos saves"), [app](std::string& result) {
     char stamp[32];
     const std::time_t now = std::time(nullptr);
     std::strftime(stamp, sizeof(stamp), "%Y-%m-%d_%H-%M-%S", std::localtime(&now));
@@ -1236,12 +1242,12 @@ bool Job::Backup(const fs::path& app) {
     }
     if (!ec && fs::exists(app / "menu.ini", ec)) fs::copy_file(app / "menu.ini", dest / "menu.ini", ec);
     if (ec) {
-      result = "The backup failed (" + ec.message() + ").";
+      result = T("The backup failed (", "O backup falhou (") + ec.message() + ").";
       return false;
     }
     std::ofstream(dest / kBackupMarker) << "Metal Gear Rising: Revengeance RePlatinum backup: saves/, trophies (UserData/) and "
                                            "menu.ini.\nRestore it from the menu's SAVES page.\n";
-    result = "Backed up to install/backups/" + dest.filename().string() + ".";
+    result = T("Backed up to install/backups/", "Backup feito em install/backups/") + dest.filename().string() + ".";
     return true;
   });
 }
@@ -1272,14 +1278,15 @@ bool Job::DeleteLeftovers(const fs::path& app) {
     std::lock_guard<std::mutex> lock(mutex_);
     leftovers_.clear();
   }
-  return Start("Deleting the installed files from install/", [files](std::string& result) {
+  return Start(T("Deleting the installed files from install/", "Apagando os arquivos já instalados de install/"), [files](std::string& result) {
     uint64_t freed = 0;
     for (const fs::path& f : files) {
       std::error_code ec;
       const uint64_t size = fs::file_size(f, ec);
       if (fs::remove(f, ec) && !ec) freed += size;
     }
-    result = "Deleted the installed files from install/ (" + Gb(freed) + " freed).";
+    result = T("Deleted the installed files from install/ (", "Arquivos já instalados apagados de install/ (") + Gb(freed) +
+             T(" freed).", " liberados).");
     return true;
   });
 }

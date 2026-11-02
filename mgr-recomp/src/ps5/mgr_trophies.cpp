@@ -1,5 +1,6 @@
 // Metal Gear Rising: Revengeance PS5 - trophies (see mgr_trophies.h; from gta4-ps5's hub_trophies.cpp).
 #include "mgr_trophies.h"
+#include "mgr_text.h"
 
 #include <algorithm>
 #include <cmath>
@@ -296,9 +297,12 @@ std::string FitText(ImFont* f, float size, std::string t, float width) {
 
 // Letter-spaced text (the small capitals line).
 void Spaced(ImDrawList* dl, ImFont* f, float size, ImVec2 p, ImU32 col, const char* t, float spacing) {
-  for (const char* c = t; *c; ++c) {
-    dl->AddText(f, size, p, col, c, c + 1);
-    p.x += f->CalcTextSizeA(size, FLT_MAX, 0, c, c + 1).x + spacing;
+  for (const char* c = t; *c;) {  // (a whole UTF-8 letter at a time)
+    const char* next = c + 1;
+    while ((static_cast<unsigned char>(*next) & 0xC0) == 0x80) ++next;
+    dl->AddText(f, size, p, col, c, next);
+    p.x += f->CalcTextSizeA(size, FLT_MAX, 0, c, next).x + spacing;
+    c = next;
   }
 }
 
@@ -344,10 +348,15 @@ void DrawCard(ImDrawList* dl, ImVec2 display, const Card& card, float age, ImFon
   const float tx = i1.x + 20 * k, tw = p1.x - 22 * k - tx;
   DrawCup(dl, ImVec2(tx + 8 * k, p0.y + 27 * k), 20 * k, card.grade, alpha);
   Spaced(dl, bold, 15 * k, ImVec2(tx + 24 * k, p0.y + 18 * k), WhiteA(0.62f * alpha),
-         card.platinum ? "PLATINUM TROPHY" : "TROPHY EARNED", 1.8f * k);
+         card.platinum ? T("PLATINUM TROPHY", "TROFÉU DE PLATINA") : T("TROPHY EARNED", "TROFÉU CONQUISTADO"),
+         1.8f * k);
   dl->AddText(bold, 25 * k, ImVec2(tx, p0.y + 40 * k), WhiteA(alpha), FitText(bold, 25 * k, card.name, tw).c_str());
-  const std::string sub = card.platinum ? "Every Metal Gear Rising: Revengeance RePlatinum trophy"
-                                        : std::string(GradeName(card.grade)) + "  \xC2\xB7  Metal Gear Rising: Revengeance";
+  static constexpr const char* kGradesPt[] = {"Bronze", "Prata", "Ouro", "Platina"};  // (Grade's order)
+  const std::string sub = card.platinum
+                              ? T("Every Metal Gear Rising: Revengeance RePlatinum trophy",
+                                  "Todos os troféus de Metal Gear Rising: Revengeance RePlatinum")
+                              : std::string(T(GradeName(card.grade), kGradesPt[int(card.grade) & 3])) +
+                                    "  \xC2\xB7  Metal Gear Rising: Revengeance";
   dl->AddText(body, 17 * k, ImVec2(tx, p0.y + 74 * k), GradeColor(card.grade, 0.9f * alpha),
               FitText(body, 17 * k, sub, tw).c_str());
 }

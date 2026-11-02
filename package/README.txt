@@ -69,8 +69,10 @@ SETTINGS  GRAPHICS
                             stronger rumble; FEEDBACK STRENGTH and LIGHT BAR.
           GAME
           LANGUAGE          the game's text and subtitles: English, French,
-                            German, Italian or Spanish. AUTO (the default)
-                            follows the PS5's language, English otherwise.
+                            German, Italian, Spanish or Portuguese (Brazil).
+                            AUTO (the default) follows the PS5's language,
+                            English otherwise. In Portuguese this menu, the
+                            quick menu and the trophy pop-ups are too.
           SKIP INTRO        no logos at the start (on).
           HD CUTSCENES      the HD cutscenes, when installed (see below).
           CHEAT MENU        on: press L3 + R3 (both sticks in) while playing
