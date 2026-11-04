@@ -336,6 +336,13 @@ void MgrApp::OnPreSetup(rex::RuntimeConfig& config) {
   // instead of the draw being dropped.
   if (!rex::cvar::HasNonDefaultValue("gpu_allow_invalid_fetch_constants"))
     rex::cvar::SetLaunchFlag("gpu_allow_invalid_fetch_constants", "true");
+  // Hitches when the game meets new shaders: as Max Payne 3 RePrescribed, The Darkness, Saints Row,
+  // Prototype and Driver San Francisco do, frames with a pipeline still being built are shown, not
+  // skipped, and three creation threads build them, not 3/4 of the CPUs (12), which all compiled on
+  // the game's cores at once in a burst of new pipelines and starved its threads.
+  rex::cvar::SetLaunchFlag("vulkan_async_skip_incomplete_frames", "false");
+  if (!rex::cvar::HasNonDefaultValue("vulkan_pipeline_creation_threads"))
+    rex::cvar::SetLaunchFlag("vulkan_pipeline_creation_threads", "3");
   // The stall sampler (SIGPROF to every thread once no frame has come for 300
   // ms) is armed by the FPS counter's frame count, and froze Crackdown's loads.
   if (!rex::cvar::HasNonDefaultValue("ps5_hang_reports")) rex::cvar::SetLaunchFlag("ps5_hang_reports", "false");
