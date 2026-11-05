@@ -76,12 +76,14 @@ std::vector<std::unique_ptr<rex::ui::ImmediateTexture>>* g_textures =
 // ---- the pad ----
 
 enum : uint32_t {
-  kUp = 1, kDown = 2, kLeft = 4, kRight = 8, kCross = 16, kCircle = 32, kL1 = 64, kR1 = 128, kTriangle = 256
+  kUp = 1, kDown = 2, kLeft = 4, kRight = 8, kCross = 16, kCircle = 32, kL1 = 64, kR1 = 128, kTriangle = 256,
+  kSquare = 512
 };
 
 constexpr uint32_t kPadUp = 0x00000010u, kPadRight = 0x00000020u, kPadDown = 0x00000040u,
                    kPadLeft = 0x00000080u, kPadL1 = 0x00000400u, kPadR1 = 0x00000800u,
-                   kPadTriangle = 0x00001000u, kPadCircle = 0x00002000u, kPadCross = 0x00004000u;
+                   kPadTriangle = 0x00001000u, kPadCircle = 0x00002000u, kPadCross = 0x00004000u,
+                   kPadSquare = 0x00008000u;
 struct PadData {
   uint32_t buttons;
   uint8_t lx, ly, rx, ry, l2, r2;
@@ -114,6 +116,7 @@ class Pad {
     if (d.buttons & kPadCross) b |= kCross;
     if (d.buttons & kPadCircle) b |= kCircle;
     if (d.buttons & kPadTriangle) b |= kTriangle;
+    if (d.buttons & kPadSquare) b |= kSquare;
     if (d.buttons & kPadL1) b |= kL1;
     if (d.buttons & kPadR1) b |= kR1;
     uint32_t pressed = b & ~last_;
@@ -210,6 +213,16 @@ struct Settings {
   static constexpr const char* kSharpnessNames[] = {"", "LOW", "MEDIUM", "HIGH"};
   // FSR 1's RCAS sharpness reduction in stops (0 = sharpest) for each sharpness.
   static constexpr const char* kSharpnessStops[] = {"", "1.0", "0.5", "0.2"};
+
+  // The recommended settings (SQUARE on SETTINGS): the user's own, tested (2026-11-03). The menu's
+  // song level stays as it is.
+  static Settings Recommended(const Settings& now) {
+    Settings s = now;
+    s.language = LanguageIndex(0), s.aa = 2, s.fsr = true, s.sharpness = 3, s.host_rts = false, s.filter = 5;
+    s.lane = true, s.ps_buttons = true, s.dualsense = true, s.dualsense_strength = 3, s.fps_counter = 0;
+    s.lightbar_effects = true, s.skip_intro = true, s.hd_movies = true, s.cheat_menu = true;
+    return s;
+  }
 
   static Settings Load(const fs::path& app) {
     Settings s;
@@ -376,6 +389,38 @@ float Spaced(ImDrawList* dl, ImFont* f, float size, ImVec2 p, ImU32 col, const c
     c = next;
   }
   return p.x - x0 - spacing;
+}
+
+// The footer's button hints, with SQUARE and TRIANGLE (QUADRADO, TRIÂNGULO) drawn as the DualSense's
+// symbols, outlined like its buttons (X and O read as theirs already); returns the width (draw false:
+// measured only).
+float Hints(ImDrawList* dl, ImFont* f, float size, ImVec2 p, ImU32 col, const std::string& t, bool draw) {
+  static constexpr const char* kWords[] = {"SQUARE", "QUADRADO", "TRIANGLE", "TRIÂNGULO"};
+  const float x0 = p.x, icon = size * 0.66f, line = std::max(1.0f, size * 0.075f);
+  size_t i = 0;
+  while (i < t.size()) {
+    size_t at = std::string::npos;
+    int word = -1;
+    for (int k = 0; k < 4; ++k) {
+      const size_t a = t.find(kWords[k], i);
+      if (a < at) at = a, word = k;
+    }
+    const size_t end = at == std::string::npos ? t.size() : at;
+    if (end > i) {
+      if (draw) dl->AddText(f, size, p, col, t.c_str() + i, t.c_str() + end);
+      p.x += f->CalcTextSizeA(size, FLT_MAX, 0, t.c_str() + i, t.c_str() + end).x;
+    }
+    if (at == std::string::npos) break;
+    const float cy = p.y + size * 0.52f, h = icon * 0.5f;
+    if (draw && word < 2)
+      dl->AddRect(ImVec2(p.x + line, cy - h + line), ImVec2(p.x + icon - line, cy + h - line), col, 0, 0, line * 1.6f);
+    else if (draw)
+      dl->AddTriangle(ImVec2(p.x + icon * 0.5f, cy - h), ImVec2(p.x + icon, cy + h * 0.8f), ImVec2(p.x, cy + h * 0.8f),
+                      col, line * 1.6f);
+    p.x += icon;
+    i = at + std::char_traits<char>::length(kWords[word]);
+  }
+  return p.x - x0;
 }
 
 // The pages, in the tab bar's order.
@@ -552,6 +597,11 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     if (p & (kL1 | kR1)) {
       page_ = Page((page_ + ((p & kR1) ? 1 : kPages - 1)) % kPages);
       page_in_ = 0;
+      if (page_ == kSettings) in_list_ = false, confirm_key_ = -1;  // (SETTINGS opens on the game)
+      return;
+    }
+    if ((p & kCircle) && page_ == kSettings && in_list_) {
+      in_list_ = false;  // (back to the game first)
       return;
     }
     if ((p & kCircle) && page_ != kHome) {
@@ -599,6 +649,16 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
         break;
       }
       case kSettings: {
+        // SQUARE, twice: the recommended settings back
+        if ((p & kSquare) && Confirmed(300)) {
+          settings_ = Settings::Recommended(settings_);
+          reset_t_ = time_;
+          REXLOG_INFO("Metal Gear Rising: Revengeance menu: recommended settings put back");
+        }
+        if (!in_list_) {
+          if (p & (kRight | kCross)) in_list_ = true;  // (into its settings)
+          break;
+        }
         if (p & kUp) row_ = (row_ + kSettingsRows - 1) % kSettingsRows;
         if (p & kDown) row_ = (row_ + 1) % kSettingsRows;
         const int step = (p & kRight) ? 1 : (p & kLeft) ? -1 : 0;
@@ -1078,8 +1138,8 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
                   "CIMA BAIXO  MOVER      X  ESCOLHER      O  VOLTAR      L1 R1  PÁGINAS");
         break;
       case kSettings:
-        hints = T("UP DOWN  MOVE      LEFT RIGHT  CHANGE      O  BACK      L1 R1  PAGES",
-                  "CIMA BAIXO  MOVER      ESQUERDA DIREITA  MUDAR      O  VOLTAR      L1 R1  PÁGINAS");
+        hints = in_list_ ? T("UP DOWN  MOVE      LEFT RIGHT  CHANGE      SQUARE  RECOMMENDED      O  GAME      L1 R1  PAGES", "CIMA BAIXO  MOVER      ESQUERDA DIREITA  MUDAR      QUADRADO  RECOMENDADO      O  JOGO      L1 R1  PÁGINAS")
+                         : T("X  SETTINGS      SQUARE  RECOMMENDED      O  BACK      L1 R1  PAGES", "X  CONFIGURAÇÕES      QUADRADO  RECOMENDADO      O  VOLTAR      L1 R1  PÁGINAS");
         break;
       case kTrophies:
         hints = T("UP DOWN  MOVE      LEFT RIGHT  PAGE UP / DOWN      O  BACK      L1 R1  PAGES",
@@ -1087,7 +1147,7 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
         break;
       default: hints = T("O  BACK      L1 R1  PAGES", "O  VOLTAR      L1 R1  PÁGINAS"); break;
     }
-    const float hints_w = Width(g_body, 22 * u, hints);
+    const float hints_w = Hints(dl, g_body, 22 * u, ImVec2(0, 0), 0, hints, false);
     // HOME leaves the picture undimmed: a shade in the corner under the hints,
     // fading out to the left and upward
     const float shade = 1.0f - std::clamp(page_dark_ / 0.74f, 0.0f, 1.0f);
@@ -1102,7 +1162,7 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     dl->AddRectFilled(ImVec2(140 * u, y - 18 * u), ImVec2(size.x - 140 * u, y - 17 * u), A(IM_COL32(255, 255, 255, 40)));
     dl->AddText(g_body, 22 * u, ImVec2(140 * u, y), A(kRed),
                 Upper(Date(int64_t(std::time(nullptr)), T("%a / %b %d / %I:%M %p", "%a / %d %b / %H:%M"))).c_str());
-    dl->AddText(g_body, 22 * u, ImVec2(size.x - 140 * u - hints_w, y), A(kRed), hints.c_str());
+    Hints(dl, g_body, 22 * u, ImVec2(size.x - 140 * u - hints_w, y), A(kRed), hints, true);
   }
 
   void DrawHome(ImDrawList* dl, const ImVec2& size) {
@@ -1363,10 +1423,31 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     dl->AddText(g_body, 26 * u, ImVec2(px, 204 * u), P(kText), text.c_str(), nullptr, pw);
   }
 
+  // SETTINGS' left side: the game, as on HOME (its logo with the accent's bar, pulsing while the
+  // pad is on it), its settings at the right.
+  void DrawSettingsGame(ImDrawList* dl, float left, float top) {
+    const float u = u_;
+    Spaced(dl, g_body, 19 * u, ImVec2(left, top), P(kRed), T("GAME", "JOGO"), 3 * u);
+    const float y = top + 46 * u;
+    float h = 53 * u;
+    if (logo_) h = std::min(h, 330 * u * logo_.h / logo_.w);  // (a wide logo kept to the column)
+    const float pulse = in_list_ ? 1.0f : 0.7f + 0.3f * std::sin(time_ * 5.0f);
+    dl->AddRectFilled(ImVec2(left - 38 * u, y + h * 0.12f), ImVec2(left - 24 * u, y + h * 0.88f),
+                      P((kRed & 0x00FFFFFFu) | (ImU32(255 * pulse) << 24)));
+    if (logo_)
+      dl->AddImage(logo_.id, ImVec2(left, y), ImVec2(left + logo_.w * h / logo_.h, y + h), ImVec2(0, 0), ImVec2(1, 1),
+                   P(kWhite));
+    else
+      dl->AddText(g_item, h * 0.7f, ImVec2(left, y), P(kWhite), "METAL GEAR RISING: REVENGEANCE");
+  }
+
   void DrawSettings(ImDrawList* dl, const ImVec2& size) {
-    const float u = u_, left = 140 * u + page_dx_;
+    const float u = u_, left = 580 * u + page_dx_;
     const auto lines = SettingsLines();
     const float fs = 36 * u, top = 190 * u, bottom = size.y - 120 * u;
+    const float px = 1360 * u + page_dx_, pw = size.x - 140 * u - px;  // (the help, at the right)
+    DrawSettingsGame(dl, 140 * u + page_dx_, top);
+    dl->AddRectFilled(ImVec2(left - 60 * u, 190 * u), ImVec2(left - 59 * u, 760 * u), P(IM_COL32(255, 255, 255, 40)));
     // where each row and section heading goes (scrolled so the focused row stays in view)
     std::vector<float> row_y(kSettingsRows, 0.0f), head_y(kSettingsRows, -1.0f);
     float y = 0;
@@ -1382,34 +1463,41 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
     const float view = bottom - top;
     const float want = std::clamp(row_y[size_t(row_)] - view * 0.45f, 0.0f, std::max(0.0f, y - view));
     settings_scroll_ += (want - settings_scroll_) * 0.25f;
-    dl->PushClipRect(ImVec2(0, top - 4 * u), ImVec2(1000 * u + page_dx_, bottom), true);
+    dl->PushClipRect(ImVec2(0, top - 4 * u), ImVec2(px - 40 * u, bottom), true);
     for (int r = 0; r < kSettingsRows; ++r) {
       const SettingLine& l = lines[size_t(r)];
       if (head_y[size_t(r)] >= 0)
         Spaced(dl, g_body, 19 * u, ImVec2(left, top + head_y[size_t(r)] - settings_scroll_), P(kRed), l.section,
                3 * u);
       y = top + row_y[size_t(r)] - settings_scroll_;
-      const bool sel = r == row_;
+      const bool sel = in_list_ && r == row_;
       const ImU32 col = !l.enabled ? kDim : sel ? kWhite : kGrey;
       if (sel) dl->AddRectFilled(ImVec2(left - 30 * u, y + 8 * u), ImVec2(left - 20 * u, y + fs), P(kRed));
       dl->AddText(g_item, fs, ImVec2(left, y), P(col), l.label);
       const std::string v = l.slider || !l.enabled ? l.value : "<  " + l.value + "  >";
-      dl->AddText(g_item, fs, ImVec2(left + 420 * u, y), P(sel ? (l.enabled ? kRed : kDim) : col), v.c_str());
+      dl->AddText(g_item, fs, ImVec2(left + 380 * u, y), P(sel ? (l.enabled ? kRed : kDim) : col), v.c_str());
       if (l.slider) {
-        const float x0 = left + 540 * u, w = 260 * u, yy = y + fs * 0.6f;
+        const float x0 = left + 480 * u, w = 220 * u, yy = y + fs * 0.6f;
         dl->AddRectFilled(ImVec2(x0, yy - 3 * u), ImVec2(x0 + w, yy + 3 * u), P(kDim));
         dl->AddRectFilled(ImVec2(x0, yy - 3 * u), ImVec2(x0 + w * settings_.music / 100.0f, yy + 3 * u),
                           P(sel ? kRed : kGrey));
       }
     }
     dl->PopClipRect();
-    // the focused row's help, at the right
-    const float px = 1060 * u + page_dx_, pw = 720 * u;
+    // the focused row's help, at the right (on the game: what it's for)
     dl->AddRectFilled(ImVec2(px - 40 * u, 190 * u), ImVec2(px - 39 * u, 760 * u), P(IM_COL32(255, 255, 255, 40)));
-    dl->AddText(g_item, 34 * u, ImVec2(px, 190 * u), P(kWhite), lines[size_t(row_)].label);
-    dl->AddText(g_body, 28 * u, ImVec2(px, 244 * u), P(kText), lines[size_t(row_)].help, nullptr, pw);
-    dl->AddText(g_body, 22 * u, ImVec2(px, 700 * u), P(kDim),
-                T("Saved when you press PLAY.", "Salvo quando você aperta JOGAR."));
+    dl->AddText(g_item, 34 * u, ImVec2(px, 190 * u), P(kWhite), in_list_ ? lines[size_t(row_)].label : "METAL GEAR RISING: REVENGEANCE");
+    const char* about = T("Metal Gear Rising: Revengeance's settings. X or RIGHT to change them. SQUARE puts back the recommended settings, the ones it was tested with.",
+                  "Configurações de Metal Gear Rising: Revengeance. X ou DIREITA para mudá-las. QUADRADO volta às configurações recomendadas, as que foram testadas.");
+    dl->AddText(g_body, 26 * u, ImVec2(px, 244 * u), P(kText), in_list_ ? lines[size_t(row_)].help : about, nullptr, pw);
+    if (Confirming(300))
+      dl->AddText(g_body, 22 * u, ImVec2(px, 676 * u), P(kRed),
+                  T("PRESS SQUARE AGAIN TO PUT BACK THE RECOMMENDED SETTINGS", "APERTE QUADRADO DE NOVO PARA VOLTAR ÀS CONFIGURAÇÕES RECOMENDADAS"), nullptr, pw);
+    else if (time_ - reset_t_ < 3.0f)
+      dl->AddText(g_body, 22 * u, ImVec2(px, 700 * u), P(kRed),
+                  T("RECOMMENDED SETTINGS PUT BACK", "CONFIGURAÇÕES RECOMENDADAS RESTAURADAS"));
+    else
+      dl->AddText(g_body, 22 * u, ImVec2(px, 700 * u), P(kDim), T("Saved when you press PLAY.", "Salvo quando você aperta JOGAR."));
   }
 
   void DrawTrophies(ImDrawList* dl, const ImVec2& size, float dt) {
@@ -1657,6 +1745,8 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
   fs::path app_, user_data_;
   std::function<void(MenuChoice)> play_;
   Settings settings_;
+  bool in_list_ = false;  // SETTINGS: in the game's settings (false: on the game, at the left)
+  float reset_t_ = -100;  // (when SQUARE last put the recommended settings back)
   int hd_movies_ = 0;  // (the HD cutscenes in movie_hd/)
   Pad pad_;
   Image background_, logo_, title_;  // (title_: hub/title.png, the header's logo)
