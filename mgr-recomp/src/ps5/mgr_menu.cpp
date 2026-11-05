@@ -159,7 +159,7 @@ struct Language {
 constexpr Language kLanguages[] = {{"AUTO", 0, "AUTO"},          {"ENGLISH", 1, "INGLÊS"},
                                    {"FRENCH", 4, "FRANCÊS"},     {"GERMAN", 3, "ALEMÃO"},
                                    {"ITALIAN", 6, "ITALIANO"},   {"SPANISH", 5, "ESPANHOL"},
-                                   {"PORTUGUESE", 9, "PORTUGUÊS"}};
+                                   {"PORTUGUESE (BR)", 9, "PORTUGUÊS (BR)"}};
 constexpr int kLanguageCount = int(sizeof(kLanguages) / sizeof(kLanguages[0]));
 
 // kLanguages' row for an Xbox 360 language number (AUTO for none of them).
@@ -1475,7 +1475,11 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
       if (sel) dl->AddRectFilled(ImVec2(left - 30 * u, y + 8 * u), ImVec2(left - 20 * u, y + fs), P(kRed));
       dl->AddText(g_item, fs, ImVec2(left, y), P(col), l.label);
       const std::string v = l.slider || !l.enabled ? l.value : "<  " + l.value + "  >";
-      dl->AddText(g_item, fs, ImVec2(left + 380 * u, y), P(sel ? (l.enabled ? kRed : kDim) : col), v.c_str());
+      // (a value too wide for its column, e.g. AUTO (PORTUGUÊS (BR)), drawn smaller instead of cut off)
+      const float room = px - 48 * u - (left + 380 * u), vw = g_item->CalcTextSizeA(fs, FLT_MAX, 0, v.c_str()).x;
+      const float vs = vw > room ? fs * room / vw : fs;
+      dl->AddText(g_item, vs, ImVec2(left + 380 * u, y + (fs - vs) * 0.6f), P(sel ? (l.enabled ? kRed : kDim) : col),
+                  v.c_str());
       if (l.slider) {
         const float x0 = left + 480 * u, w = 220 * u, yy = y + fs * 0.6f;
         dl->AddRectFilled(ImVec2(x0, yy - 3 * u), ImVec2(x0 + w, yy + 3 * u), P(kDim));
