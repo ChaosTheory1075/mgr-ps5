@@ -2087,6 +2087,86 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
         sys.exit(f"patch_framework: {n[0]} error sites in Decode")
     xc.write_text(xt[:a] + body + xt[b:])
     print(f"patched  {xc} (Decode: next-buffer search, {n[0]} error sites counted)")
+    draw_profile(sdk)
+
+
+def draw_profile(sdk):
+    """What one draw costs on the GPU command thread (cvar gpu_draw_profile, rex/<port>_perf.h).
+
+    IssueDraw is timed step by step with the CPU's tick counter (each step exclusive: primitives,
+    shaders and samplers, texture requests, render targets, pipeline, layout + viewport + dynamic
+    state, system constants, bindings, vertex buffers, barriers + render pass, recording, the rest),
+    and every 10 s the "draw cost" line gives each step per frame and per draw, plus the GPU
+    thread's busy time outside IssueDraw (PM4 packets and register writes). Timing only: nothing
+    the GPU draws changes. Self-contained, for any port with a <port>_perf.h of this shape.
+    """
+    vcp = sdk / "src" / "graphics" / "vulkan" / "command_processor.cpp"
+    edit(vcp,
+         "REXCVAR_DEFINE_BOOL(vulkan_readback_resolve, false, \"GPU/Vulkan\",\n",
+         "REXCVAR_DEFINE_BOOL(gpu_draw_profile, false, \"GPU\",\n"
+         "                    \"Time each step of a draw on the GPU command thread (the 'draw cost' log line, \"\n"
+         "                    \"every 10 s)\");\n"
+         "REXCVAR_DEFINE_BOOL(vulkan_readback_resolve, false, \"GPU/Vulkan\",\n")
+    P = "rex::mgr_perf::"
+    steps = [
+        ("  memexport_ranges_.clear();\n\n  // Vertex shader analysis.\n",
+         f"  {P}DrawPhases mgr_dp(REXCVAR_GET(gpu_draw_profile));  // [perf] the draw profile\n", None),
+        ("    // Process primitives.\n    if (!primitive_processor_->Process(primitive_processing_result)) {",
+         None, "kPrimitive"),
+        ("    // Shader modifications.\n    vertex_shader_modification", None, "kDrawShaders"),
+        ("  uint32_t normalized_color_mask =\n      pixel_shader ? draw_util::GetNormalizedColorMask",
+         None, "kDrawSetup"),
+        ("  texture_cache_->RequestTextures(used_texture_mask);", None, "kTexRequest"),
+        ("  // Set up the render targets - this may perform dispatches and draws.", None, "kRtUpdate"),
+        ("  // Create the pipeline (for this, need the render pass from the render target", None, "kPipeline"),
+        ("  bool host_render_targets_used =\n      render_target_cache_->GetPath()", None, "kDynState"),
+        ("  // Update system constants before uploading them.", None, "kSysConst"),
+        ("  // Update uniform buffers and descriptor sets after binding the pipeline with", None, "kBindings"),
+        ("  // Ensure vertex buffers are resident.", None, "kVertexFetch"),
+        ("  // Synchronize the memory pages backing memory scatter export streams, and", None, "kRenderPass"),
+        ("  // Draw.\n  ++frame_flow_draw_submitted_;", None, "kRecord"),
+    ]
+    for anchor, after, phase in steps:
+        if after:  # (placed after the anchor)
+            edit(vcp, anchor, anchor.split("\n\n")[0] + "\n" + after + "\n" + anchor.split("\n\n", 1)[1])
+        else:  # (the step starts here)
+            edit(vcp, anchor, f"  mgr_dp.To({P}{phase});  // [perf]\n" + anchor)
+    edit(vcp,
+         "                  n[kReadbackLate], ms[kOcclusion], n[kOcclusion]);\n",
+         "                  n[kReadbackLate], ms[kOcclusion], n[kOcclusion]);\n"
+         "      if (REXCVAR_GET(gpu_draw_profile)) {\n"
+         "        // [perf] the draw profile: each step's ticks in ms a frame (ticks per ns from the clock)\n"
+         "        static uint64_t prev_tk[kCount], prev_ticks = 0, prev_clock = 0;\n"
+         "        const uint64_t ticks = Ticks(), clock = NowNs();\n"
+         "        if (prev_ticks && clock > prev_clock && ticks > prev_ticks) {\n"
+         "          const double tk_per_ms = double(ticks - prev_ticks) / (double(clock - prev_clock) / 1e6);\n"
+         "          double st[kCount], sum = 0;\n"
+         "          for (uint32_t c = 0; c < kCount; ++c) {\n"
+         "            const uint64_t v = g_tk[c].load(std::memory_order_relaxed);\n"
+         "            st[c] = double(v - prev_tk[c]) / tk_per_ms / double(frames);\n"
+         "            sum += st[c];\n"
+         "          }\n"
+         "          const double busy = std::max(0.0, frame_ms - ms[kIdle] - ms[kWaitRegMem] - ms[kFenceWait] -\n"
+         "                                                 ms[kSubmit] - ms[kSwap] - ms[kCopy] - ms[kOcclusion]);\n"
+         "          const double per = n[kDraw] > 0 ? 1000.0 / n[kDraw] : 0;  // (ms a frame -> us a draw)\n"
+         "          REXGPU_INFO(\"draw cost: {:.0f} draws a frame, IssueDraw {:.2f} ms ({:.2f} us a draw): primitives {:.2f}, \"\n"
+         "                      \"shaders+samplers {:.2f}, texture requests {:.2f}, render targets {:.2f}, pipeline {:.2f}, \"\n"
+         "                      \"layout+viewport+dynamic {:.2f}, system constants {:.2f}, bindings {:.2f}, \"\n"
+         "                      \"vertex buffers {:.2f}, barriers+render pass {:.2f}, record {:.2f}, the rest {:.2f} \"\n"
+         "                      \"(us a draw: {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f}); \"\n"
+         "                      \"GPU thread busy outside draws {:.2f} ms (PM4 packets, register writes)\",\n"
+         "                      n[kDraw], sum, sum * per, st[kPrimitive], st[kDrawShaders], st[kTexRequest], st[kRtUpdate],\n"
+         "                      st[kPipeline], st[kDynState], st[kSysConst], st[kBindings], st[kVertexFetch],\n"
+         "                      st[kRenderPass], st[kRecord], st[kDrawSetup], st[kPrimitive] * per,\n"
+         "                      st[kDrawShaders] * per, st[kTexRequest] * per, st[kRtUpdate] * per, st[kPipeline] * per,\n"
+         "                      st[kDynState] * per, st[kSysConst] * per, st[kBindings] * per, st[kVertexFetch] * per,\n"
+         "                      st[kRenderPass] * per, st[kRecord] * per, st[kDrawSetup] * per,\n"
+         "                      std::max(0.0, busy - sum));\n"
+         "        }\n"
+         "        for (uint32_t c = 0; c < kCount; ++c) prev_tk[c] = g_tk[c].load(std::memory_order_relaxed);\n"
+         "        prev_ticks = ticks;\n"
+         "        prev_clock = clock;\n"
+         "      }\n")
 
 
 if __name__ == "__main__":

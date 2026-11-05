@@ -201,8 +201,12 @@ void GameOverlay::Feedback() {
       // hit: the health dropped; repaired (Zandatsu, a nanopaste): it rose by a twentieth or more
       const int32_t drop = health_ - p.health;
       if (drop > 0) {
-        service.Emit(0, device.generation, sony::Event::kDamage,
-                     std::min(1.0f, 0.45f + 4.0f * float(drop) / float(p.most)), now);
+        const float strength = std::min(1.0f, 0.45f + 4.0f * float(drop) / float(p.most));
+        service.Emit(0, device.generation, sony::Event::kDamage, strength, now);
+        static int hits_logged = 0;
+        if (hits_logged < 3 && ++hits_logged)
+          REXLOG_INFO("Metal Gear Rising: DualSense hit rumble {:.2f} (health {} -> {} of {})", strength, health_,
+                      p.health, p.most);
         hit_until_ms_ = now + 220;
       } else if (-drop * 20 >= p.most) {
         heal_until_ms_ = now + 450;
@@ -225,6 +229,13 @@ void GameOverlay::Feedback() {
     const float fuel = p.fuel_most > 0 ? std::clamp(p.fuel / p.fuel_most, 0.0f, 1.0f) : 0.0f;
     state.left_resistance = p.ripper ? 1.0f : 0.25f + 0.6f * fuel;
     state.right_resistance = 0.3f;
+    static bool logged = false;
+    if (!logged) {
+      logged = true;
+      REXLOG_INFO("Metal Gear Rising: DualSense light bar {},{},{} from Raiden's health ({} of {}), triggers L2 {:.2f} "
+                  "R2 {:.2f}", color[0], color[1], color[2], p.health, p.most, state.left_resistance,
+                  state.right_resistance);
+    }
   }
   service.Publish(0, device.generation, state, now);
   player_ = p.valid ? p.object : 0;

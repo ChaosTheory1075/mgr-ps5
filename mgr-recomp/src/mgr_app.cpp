@@ -185,6 +185,23 @@ extern "C" void sub_823236C0(PPCContext& __restrict ctx, uint8_t* base) {
 #endif
 }
 
+// The title's XInputSetState (sub_823236D0: r3 the user, r4 the two motors' speeds, u16 each; then
+// XamInputSetState at 82323750). The DualSense gets them from the framework; this only logs the game's
+// first rumble, so a log shows it reached the controller (as Stranglehold's sub_823FB6C8).
+extern "C" void sub_823236D0(PPCContext& __restrict ctx, uint8_t* base) {
+  static bool logged = false;
+  if (!logged && ctx.r4.u32) {
+    const uint16_t left = __builtin_bswap16(*reinterpret_cast<const uint16_t*>(base + ctx.r4.u32));
+    const uint16_t right = __builtin_bswap16(*reinterpret_cast<const uint16_t*>(base + ctx.r4.u32 + 2));
+    if (left || right) {
+      logged = true;
+      REXLOG_INFO("Metal Gear Rising: the game's first rumble (user {}, motors {:#x} {:#x}) sent to the controller",
+                  ctx.r3.u32, left, right);
+    }
+  }
+  __imp__sub_823236D0(ctx, base);
+}
+
 // Skip the startup logos. The boot loop (sub_82C00290) shows six logos (Konami,
 // Kojima Productions, PlatinumGames, Havok, CRI, Dolby: logo\*.wtb, loaded by
 // sub_82BFBF40) while the game loads, and carries on once both are done; the
@@ -343,6 +360,9 @@ void MgrApp::OnPreSetup(rex::RuntimeConfig& config) {
   rex::cvar::SetLaunchFlag("vulkan_async_skip_incomplete_frames", "false");
   if (!rex::cvar::HasNonDefaultValue("vulkan_pipeline_creation_threads"))
     rex::cvar::SetLaunchFlag("vulkan_pipeline_creation_threads", "3");
+  // What one draw costs on the GPU thread, step by step: the "draw cost" line every 10 s (for the
+  // ports' shared per-draw work, Downloads\Recomps\PERF-COLLECTIVE.md). Timing only.
+  if (!rex::cvar::HasNonDefaultValue("gpu_draw_profile")) rex::cvar::SetLaunchFlag("gpu_draw_profile", "true");
   // The stall sampler (SIGPROF to every thread once no frame has come for 300
   // ms) is armed by the FPS counter's frame count, and froze Crackdown's loads.
   if (!rex::cvar::HasNonDefaultValue("ps5_hang_reports")) rex::cvar::SetLaunchFlag("ps5_hang_reports", "false");

@@ -32,11 +32,44 @@ enum Counter : uint32_t {
   kBindings,      // in draws: UpdateBindings (constants, descriptors)
   kVertexFetch,   // in draws: vertex buffer requests
   kRenderPass,    // in draws: barriers and entering the render pass
+  kDrawSetup,     // in draws: shader analysis, counters, the rest of IssueDraw's own code
+  kDrawShaders,   // in draws: submission, shader modifications and translations, samplers
+  kDynState,      // in draws: pipeline layout, viewport and dynamic state
+  kRecord,        // in draws: index buffer bind and the draw recorded
   kCount
 };
 
 inline std::atomic<uint64_t> g_ns[kCount];
 inline std::atomic<uint64_t> g_n[kCount];
+
+// The draw profile (gpu_draw_profile): IssueDraw's time by step, in CPU ticks (rdtsc: a few ns
+// to read, where the steady clock can be a system call), each step exclusive. The 10 s report
+// turns ticks into time against the steady clock.
+inline std::atomic<uint64_t> g_tk[kCount];
+inline uint64_t Ticks() {
+#if defined(__x86_64__)
+  return __builtin_ia32_rdtsc();
+#else
+  return uint64_t(std::chrono::steady_clock::now().time_since_epoch().count());
+#endif
+}
+struct DrawPhases {
+  Counter c = kDrawSetup;
+  uint64_t t = 0;
+  bool on;
+  explicit DrawPhases(bool enabled) : on(enabled) {
+    if (on) t = Ticks();
+  }
+  // (charges the time since the last step to it, and starts the next)
+  void To(Counter next) {
+    if (!on) return;
+    const uint64_t now = Ticks();
+    g_tk[c].fetch_add(now - t, std::memory_order_relaxed);
+    c = next;
+    t = now;
+  }
+  ~DrawPhases() { To(kDrawSetup); }
+};
 
 inline uint64_t NowUs() {
   return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
