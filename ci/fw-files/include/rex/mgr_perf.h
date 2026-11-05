@@ -60,11 +60,12 @@ struct DrawPhases {
   explicit DrawPhases(bool enabled) : on(enabled) {
     if (on) t = Ticks();
   }
-  // (charges the time since the last step to it, and starts the next)
+  // (charges the time since the last step to it, and starts the next; IssueDraw runs on the GPU
+  // thread only, so a plain add, no locked instruction: a tick read and an add a step)
   void To(Counter next) {
     if (!on) return;
     const uint64_t now = Ticks();
-    g_tk[c].fetch_add(now - t, std::memory_order_relaxed);
+    g_tk[c].store(g_tk[c].load(std::memory_order_relaxed) + (now - t), std::memory_order_relaxed);
     c = next;
     t = now;
   }
