@@ -175,7 +175,8 @@ extern "C" void sub_822B4198(PPCContext& __restrict ctx, uint8_t* base) {
 #endif
 }
 
-// The title's XInputGetState (XamInputGetState with flags 1: r3 the user, r4 the state; 0 when read): the
+// The title's XInputGetState (XamInputGetState with flags 1: r3 the user, r4 the state; 0 when read; its one
+// call is __imp__XamInputGetState, audit 2026-11-05): the
 // quick menu's L3 + R3, and the idle pad the game gets while it's open (ps5/mgr_quick_menu.h).
 extern "C" void sub_823236C0(PPCContext& __restrict ctx, uint8_t* base) {
   const uint32_t user = ctx.r3.u32, state = ctx.r4.u32;
@@ -185,8 +186,8 @@ extern "C" void sub_823236C0(PPCContext& __restrict ctx, uint8_t* base) {
 #endif
 }
 
-// The title's XInputSetState (sub_823236D0: r3 the user, r4 the two motors' speeds, u16 each; then
-// XamInputSetState at 82323750). The DualSense gets them from the framework; this only logs the game's
+// The title's XInputSetState (sub_823236D0: r3 the user, r4 the two motors' speeds, u16 each, read as one
+// word at 0(r4); then XamInputSetState at 82323750, after XamInputGetCapabilities). The DualSense gets them from the framework; this only logs the game's
 // first rumble, so a log shows it reached the controller (as Stranglehold's sub_823FB6C8).
 extern "C" void sub_823236D0(PPCContext& __restrict ctx, uint8_t* base) {
   static bool logged = false;
@@ -206,14 +207,16 @@ extern "C" void sub_823236D0(PPCContext& __restrict ctx, uint8_t* base) {
 // Kojima Productions, PlatinumGames, Havok, CRI, Dolby: logo\*.wtb, loaded by
 // sub_82BFBF40) while the game loads, and carries on once both are done; the
 // logos' update (sub_82BFCB68, once a frame: its "done" flag at +416) is told
-// they're done, so the title comes as soon as the loading is.
+// they're done, so the title comes as soon as the loading is. (sub_82BFCB68 reads
+// +416 first and writes it at its end.)
 REXCVAR_DEFINE_BOOL(mgr_skip_intro, true, "Metal Gear Rising", "Skip the logos at the start");
 
 // HD cutscenes (the app's movie_hd/, opened in their place by the kernel's
 // NtCreateFile: ci/patch_framework.py): their cut lists' PlayRate from 30 to 240,
 // as the PC version's 60 fps pack sets it in its event files - the one value it
 // changes in them. A cut list's MotionRate, PlayRate and the next value are read
-// into three bytes (sub_8287D078: the object r3, PlayRate at +1).
+// into three bytes (sub_8287D078: the object r3; it reads the names "MotionRate" 821E9AA0 into +0,
+// "PlayRate" 821E9AAC into +1 and "DataRate" 821E9AB8 into +2 through sub_822CD618).
 REXCVAR_DEFINE_BOOL(mgr_hd_movies, true, "Metal Gear Rising",
                     "Play the cutscenes from the app's movie_hd/ when it has them (HD, 60 fps)");
 
@@ -283,7 +286,7 @@ extern "C" void sub_828CBE28(PPCContext& __restrict ctx, uint8_t* base) {
 }
 
 // The CRI libraries' errors (sub_82664438: the message r4, its numbers r5-r7),
-// in the log.
+// in the log. (Its 67 callers pass CRI's coded messages, e.g. "E05063002H" at 8212DC60.)
 extern "C" void sub_82664438(PPCContext& __restrict ctx, uint8_t* base) {
   if (ctx.r4.u32) {
     const char* text = reinterpret_cast<const char*>(base + ctx.r4.u32);
