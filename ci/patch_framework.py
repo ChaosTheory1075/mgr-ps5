@@ -2091,6 +2091,7 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
     xc.write_text(xt[:a] + body + xt[b:])
     print(f"patched  {xc} (Decode: next-buffer search, {n[0]} error sites counted)")
     draw_profile(sdk)
+    wait_diag(sdk)
     # The framework speed pack (Downloads/Recomps/speed-pack): unchanged constant writes skipped,
     # WAIT_REG_MEM polled before sleeping, the submit thread (CPU 5: the lane's twin, free here)
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -2100,6 +2101,115 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
     # not yet proven in code (Driver SF's picture broke with the same package on).
     fw_speed_pack.apply(sdk, edit, cpu=5, skip_default=0, submit_default=False,
                         perf_scope="rex::mgr_perf::Scope mgr_perf_submit_wait(rex::mgr_perf::kSubmit);")
+
+
+def wait_diag(sdk):
+    """Who ends a long wait of the game's main thread (log only: nothing the game does changes).
+
+    Every in-play dip under 60 in mgr_013..023 is one 280-360 ms stop where the main thread waits
+    on a semaphore from the CRT wait wrapper (sub_82325630, "from game code 82325668"), the GPU
+    idle, then a burst of reads. That site says nothing about which wait it is. The "ps5 hitch"
+    line now also gives the waiter's callers (three return addresses up the guest back chain:
+    lr at back_chain - 8, as the title's savegprlr prologues store it) and, for a semaphore, the
+    thread that released it last, when, and its callers. Semaphore releases record that in a
+    64-entry table (four relaxed atomic stores a release).
+    """
+    diag = sdk / "include" / "rex" / "ps5_diag.h"
+    edit(diag,
+         "}  // namespace rex::ps5diag",
+         "// [mgr wait diag] the last release of a semaphore, by handle (64 slots, newest wins)\n"
+         "struct ReleaseNote {\n"
+         "  std::atomic<uint32_t> handle{0}, thread{0}, lr[3]{};\n"
+         "  std::atomic<uint64_t> ms{0};\n"
+         "};\n"
+         "inline ReleaseNote g_release_notes[64];\n"
+         "inline ReleaseNote& ReleaseNoteFor(uint32_t handle) { return g_release_notes[(handle >> 2) & 63]; }\n"
+         "// (return addresses up a guest back chain: lr at back_chain - 8; 0 past the stack's ends;\n"
+         "// read: a function giving the big-endian word at a guest address)\n"
+         "template <typename Read>\n"
+         "inline void GuestCallers(Read read, uint32_t sp, uint32_t lo, uint32_t hi, uint32_t* out, int n) {\n"
+         "  for (int i = 0; i < n; ++i) {\n"
+         "    out[i] = 0;\n"
+         "    if (!sp || sp < lo || sp >= hi) continue;\n"
+         "    const uint32_t back = read(sp);\n"
+         "    if (back <= sp || back < lo || back > hi) { sp = 0; continue; }\n"
+         "    out[i] = read(back - 8);\n"
+         "    sp = back;\n"
+         "  }\n"
+         "}\n"
+         "}  // namespace rex::ps5diag")
+    sem = sdk / "src" / "system" / "xsemaphore.cpp"
+    edit(sem,
+         "#include <rex/system/xsemaphore.h>\n",
+         "#include <rex/system/xsemaphore.h>\n"
+         "#if REX_PLATFORM_PS5\n"
+         "#include <rex/memory/utils.h>\n"
+         "#include <rex/ps5_diag.h>\n"
+         "#include <rex/system/kernel_state.h>\n"
+         "#include <rex/system/thread_state.h>\n"
+         "#include <rex/system/xthread.h>\n"
+         "#endif\n")
+    edit(sem,
+         "  bool success = semaphore_->Release(release_count, &previous_count);\n",
+         "#if REX_PLATFORM_PS5\n"
+         "  // [mgr wait diag] who released it, for the main thread's \"ps5 hitch\" line (log only)\n"
+         "  if (auto* t = XThread::GetCurrentThread(); t && t->thread_state() && t->thread_state()->context()) {\n"
+         "    auto* ctx = t->thread_state()->context();\n"
+         "    auto* mem = memory();\n"
+         "    uint32_t up[2];\n"
+         "    rex::ps5diag::GuestCallers(\n"
+         "        [mem](uint32_t a) { return rex::memory::load_and_swap<uint32_t>(mem->TranslateVirtual<uint8_t*>(a)); },\n"
+         "        uint32_t(ctx->r1.u32), t->guest_stack_limit(), t->guest_stack_base(), up, 2);\n"
+         "    auto& note = rex::ps5diag::ReleaseNoteFor(handle());\n"
+         "    note.handle.store(handle(), std::memory_order_relaxed);\n"
+         "    note.thread.store(t->handle(), std::memory_order_relaxed);\n"
+         "    note.lr[0].store(uint32_t(ctx->lr), std::memory_order_relaxed);\n"
+         "    note.lr[1].store(up[0], std::memory_order_relaxed);\n"
+         "    note.lr[2].store(up[1], std::memory_order_relaxed);\n"
+         "    note.ms.store(rex::ps5diag::NowMs(), std::memory_order_relaxed);\n"
+         "  }\n"
+         "#endif\n"
+         "  bool success = semaphore_->Release(release_count, &previous_count);\n")
+    xo = sdk / "src" / "system" / "xobject.cpp"
+    edit(xo,
+         "#include <rex/ps5_diag.h>\n#include <rex/system/thread_state.h>\n#endif\n",
+         "#include <rex/ps5_diag.h>\n#include <rex/system/thread_state.h>\n#include <rex/memory/utils.h>\n#endif\n")
+    edit(xo,
+         "struct Ps5WaitScope {\n  rex::ps5diag::WaitSlot* slot;\n",
+         "struct Ps5WaitScope {\n  rex::ps5diag::WaitSlot* slot;\n"
+         "  rex::memory::Memory* mem = nullptr;  // [mgr wait diag]\n")
+    edit(xo,
+         "    slot->object_type = first ? uint32_t(first->type()) : 0;\n",
+         "    mem = first ? first->memory() : nullptr;\n"
+         "    slot->object_type = first ? uint32_t(first->type()) : 0;\n")
+    edit(xo,
+         "    REXLOG_INFO(\"ps5 hitch: the game's main thread waited {} ms on {} {} handle {:08X} from game \"\n"
+         "                \"code {:08X}{}\",\n",
+         "    // [mgr wait diag] the waiter's callers, and who released the semaphore\n"
+         "    std::string who;\n"
+         "    if (mem) {\n"
+         "      auto read = [this](uint32_t a) {\n"
+         "        return rex::memory::load_and_swap<uint32_t>(mem->TranslateVirtual<uint8_t*>(a));\n"
+         "      };\n"
+         "      uint32_t up[3];\n"
+         "      rex::ps5diag::GuestCallers(read, slot->guest_sp, slot->guest_stack_lo, slot->guest_stack_hi, up, 3);\n"
+         "      who = fmt::format(\"; called from {:08X} < {:08X} < {:08X}\", up[0], up[1], up[2]);\n"
+         "      auto& note = rex::ps5diag::ReleaseNoteFor(slot->handle);\n"
+         "      const uint64_t at = note.ms.load(std::memory_order_relaxed);\n"
+         "      if (slot->object_type == uint32_t(rex::system::XObject::Type::Semaphore) &&\n"
+         "          note.handle.load(std::memory_order_relaxed) == slot->handle && at >= since) {\n"
+         "        who += fmt::format(\"; released by thread {:08X} {} ms in, from {:08X} < {:08X} < {:08X}\",\n"
+         "                           note.thread.load(std::memory_order_relaxed), at - since,\n"
+         "                           note.lr[0].load(std::memory_order_relaxed),\n"
+         "                           note.lr[1].load(std::memory_order_relaxed),\n"
+         "                           note.lr[2].load(std::memory_order_relaxed));\n"
+         "      }\n"
+         "    }\n"
+         "    REXLOG_INFO(\"ps5 hitch: the game's main thread waited {} ms on {} {} handle {:08X} from game \"\n"
+         "                \"code {:08X}{}{}\",\n")
+    edit(xo,
+         "                    : std::string());\n  }\n};\n#else",
+         "                    : std::string(),\n                who);\n  }\n};\n#else")
 
 
 def draw_profile(sdk):
