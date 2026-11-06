@@ -217,13 +217,15 @@ struct Settings {
   // FSR 1's RCAS sharpness reduction in stops (0 = sharpest) for each sharpness.
   static constexpr const char* kSharpnessStops[] = {"", "1.0", "0.5", "0.2"};
 
-  // The recommended settings (SQUARE on SETTINGS): the user's own, tested (2026-11-03). The menu's
-  // song level stays as it is.
+  // The recommended settings (SQUARE twice on SETTINGS): the user's own, tested, as the console's
+  // menu.ini had them on 2026-11-06 (1.2.0): renderer FAST, FIELD OF VIEW +20. The menu's song
+  // level and the quick menu's cheats (on or off) stay as the player has them: no cheat is ever
+  // switched on here.
   static Settings Recommended(const Settings& now) {
     Settings s = now;
-    s.language = LanguageIndex(0), s.aa = 2, s.fsr = true, s.sharpness = 3, s.host_rts = false, s.filter = 5;
+    s.language = LanguageIndex(0), s.aa = 2, s.fsr = true, s.sharpness = 3, s.host_rts = true, s.filter = 5;
     s.lane = true, s.ps_buttons = true, s.dualsense = true, s.dualsense_strength = 3, s.fps_counter = 0;
-    s.lightbar_effects = true, s.skip_intro = true, s.hd_movies = true, s.cheat_menu = true;
+    s.lightbar_effects = true, s.skip_intro = true, s.hd_movies = true, s.cheat_menu = true, s.fov = 20;
     return s;
   }
 
@@ -434,7 +436,7 @@ enum Page { kHome, kContent, kSaves, kSettings, kTrophies, kCredits, kPages };
 // SAVES' rows: BACK UP SAVES, SEND LOGS, then the saves to restore or import
 enum SavesRow { kBackupRow, kSendLogsRow, kSavesFirst };
 // (in the reports SEND LOGS makes)
-constexpr const char* kAppVersion = "1.1.1";  // (param.json contentVersion 01.001.001)
+constexpr const char* kAppVersion = "1.2.0";  // (param.json contentVersion 01.002.000)
 const char* PageName(int page) {
   static constexpr const char* kEn[kPages] = {"HOME", "CONTENT", "SAVES", "SETTINGS", "TROPHIES", "CREDITS"};
   static constexpr const char* kPt[kPages] = {"INÍCIO", "CONTEÚDO", "SAVES", "AJUSTES", "TROFÉUS", "CRÉDITOS"};

@@ -2055,7 +2055,8 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
     xc.write_text(xt[:a] + body + xt[b:])
     print(f"patched  {xc} (Decode: next-buffer search, {n[0]} error sites counted)")
     draw_profile(sdk)
-    wait_diag(sdk)
+    # wait_diag(sdk) is not applied in the user's build (release candidate): it found what it was for
+    # (the checkpoint pause is the game's loop step, sub_82BFF9F8 on thread F8000158).
     overwrite_in_place(sdk)
     # The framework speed pack (Downloads/Recomps/speed-pack): unchanged constant writes skipped,
     # WAIT_REG_MEM polled before sleeping, the submit thread (CPU 5: the lane's twin, free here)

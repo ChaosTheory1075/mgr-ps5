@@ -325,12 +325,6 @@ extern "C" void sub_82BFCB68(PPCContext& __restrict ctx, uint8_t* base) {
 // change of the camera's mode and FOVs, and each event-camera FOV.
 namespace {
 constexpr uint32_t kCamera = 0x838CD740;
-float GuestFloat(uint8_t* base, uint32_t address) {
-  const uint32_t bits = REX_LOAD_U32(address);
-  float value;
-  std::memcpy(&value, &bits, sizeof(value));
-  return value;
-}
 float Degrees(float radians) { return radians * 57.29578f; }
 }  // namespace
 
@@ -382,33 +376,12 @@ extern "C" void sub_828F0D00(PPCContext& __restrict ctx, uint8_t* base) {
       }
     }
   }
-  static uint32_t last_mode = ~0u, last_flag = ~0u, lines = 0;
-  static int last_target = -1, last_current = -1;
-  const uint32_t mode = REX_LOAD_U32(kCamera + 0x8C8), flag = REX_LOAD_U32(kCamera + 0x584);
-  const float target = Degrees(GuestFloat(base, kCamera + 0x4F8));
-  const float current = Degrees(GuestFloat(base, kCamera + 0x4A8));
-  if (!std::isfinite(target) || !std::isfinite(current)) return;
-  const int target10 = int(std::lround(target * 10)), current10 = int(std::lround(current * 10));
-  // (a change of a degree or more, or of the mode words: not every frame of a transition)
-  if (mode == last_mode && flag == last_flag && std::abs(target10 - last_target) < 10 &&
-      std::abs(current10 - last_current) < 10) {
-    return;
-  }
-  last_mode = mode, last_flag = flag, last_target = target10, last_current = current10;
-  if (lines++ < 400) {
-    REXLOG_INFO("Metal Gear Rising: camera FOV target {:.1f} current {:.1f} (mode {} flag {})", target, current, mode,
-                flag);
-  }
 }
 
 extern "C" void sub_8290D108(PPCContext& __restrict ctx, uint8_t* base) {
   // (the event camera has just set its FOV: no widening while it holds)
   g_event_fov_bits.store(REX_LOAD_U32(kCamera + 0x4F8), std::memory_order_relaxed);
   g_event_fov_held.store(true, std::memory_order_relaxed);
-  static uint32_t lines = 0;
-  if (lines++ < 200) {
-    REXLOG_INFO("Metal Gear Rising: event camera FOV {:.1f}", Degrees(GuestFloat(base, kCamera + 0x4F8)));
-  }
   __imp__sub_8290D108(ctx, base);
 }
 
@@ -466,9 +439,11 @@ void MgrApp::OnPreSetup(rex::RuntimeConfig& config) {
   rex::cvar::SetLaunchFlag("vulkan_async_skip_incomplete_frames", "false");
   if (!rex::cvar::HasNonDefaultValue("vulkan_pipeline_creation_threads"))
     rex::cvar::SetLaunchFlag("vulkan_pipeline_creation_threads", "3");
-  // What one draw costs on the GPU thread, step by step: the "draw cost" line every 10 s (for the
-  // ports' shared per-draw work, Downloads\Recomps\PERF-COLLECTIVE.md). Timing only.
-  if (!rex::cvar::HasNonDefaultValue("gpu_draw_profile")) rex::cvar::SetLaunchFlag("gpu_draw_profile", "true");
+  // No profiling in the user's build (release candidate, supervisor order 2026-11-06): the CPU
+  // sampler (SIGPROF to every registered thread, the game's too, every 10 ms, and a report every
+  // 30 s) is off unless mgr.toml turns it on; the draw profile ("draw cost", gpu_draw_profile)
+  // keeps its default, off.
+  if (!rex::cvar::HasNonDefaultValue("ps5_cpu_sampler")) rex::cvar::SetLaunchFlag("ps5_cpu_sampler", "false");
   // The speed pack's constant-write skip stays OFF in the user's build (supervisor order 2026-11-06,
   // PERF-COLLECTIVE.md): the same package's "2" (on and off every 10 s) shipped in Driver SF when its
   // picture broke. No self-toggling A/B mode in a user build; measure in a separate test build.
