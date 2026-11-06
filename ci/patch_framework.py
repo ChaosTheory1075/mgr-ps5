@@ -1825,6 +1825,13 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
          "  reports = 0;\n"
          "  const uint32_t made = mgr_vk_cache_new.exchange(0);\n"
          "  std::thread([made]() {\n"
+         "#if defined(__PROSPERO__)\n"
+         "    // (off CPU 0: a new thread keeps its creator's CPUs, and the GPU thread that starts this\n"
+         "    // one has CPU 0 to itself. Reading out the 21 MB cache there held the GPU thread off its\n"
+         "    // CPU: a ~302 ms hitch 0.5 s before each \"pipeline cache saved\" (mgr_025 17:00:06,\n"
+         "    // 17:01:06, 17:02:16, 17:02:33). Now on the other threads' CPUs, as Stranglehold 8048d4d.)\n"
+         "    rex::frame_stats::scePthreadSetaffinity(pthread_self(), 0x1FCC);\n"
+         "#endif\n"
          "    const auto& dfn = mgr_vk_cache_device->functions();\n"
          "    size_t size = 0;\n"
          "    std::vector<uint8_t> data;\n"
@@ -1850,7 +1857,9 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
          "    mgr_vk_cache_saving.store(false);\n"
          "  }).detach();\n"
          "}\n")
-    edit(vpc2, "#include <algorithm>\n", "#include <algorithm>\n#include <cstdio>\n#include <filesystem>\n#include <thread>\n")
+    edit(vpc2, "#include <algorithm>\n",
+         "#include <algorithm>\n#include <cstdio>\n#include <filesystem>\n#include <thread>\n"
+         "#include <rex/frame_stats.h>  // [mgr] (the cache saver's CPUs)\n")
     edit(vpc2,
          "  auto shader_storage_root = cache_root / \"shaders\";\n"
          "  auto shader_storage_shareable_root = shader_storage_root / \"shareable\";\n",
@@ -2092,6 +2101,7 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
     print(f"patched  {xc} (Decode: next-buffer search, {n[0]} error sites counted)")
     draw_profile(sdk)
     wait_diag(sdk)
+    overwrite_in_place(sdk)
     # The framework speed pack (Downloads/Recomps/speed-pack): unchanged constant writes skipped,
     # WAIT_REG_MEM polled before sleeping, the submit thread (CPU 5: the lane's twin, free here)
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -2101,6 +2111,43 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
     # not yet proven in code (Driver SF's picture broke with the same package on).
     fw_speed_pack.apply(sdk, edit, cpu=5, skip_default=0, submit_default=False,
                         perf_scope="rex::mgr_perf::Scope mgr_perf_submit_wait(rex::mgr_perf::kSubmit);")
+
+
+def overwrite_in_place(sdk):
+    """A save's file overwritten in place: truncated, not deleted and created again.
+
+    mgr_025 17:02:30: the game's save writes Drive02000016:\\GameData_00 with NtCreateFile
+    disposition 5 (FILE_OVERWRITE_IF). OpenFile took 290 ms between "VFS resolved" (.517) and
+    "Added handle" (.806); the 28 KB write after it took under 2 ms. The game's loop thread waits
+    for it, and the main thread waits for that one: a 302 ms frame. Stock OpenFile overwrites by
+    Entry::Delete (std::filesystem::remove of the host file) and CreatePath (fopen "wb" + fclose +
+    stat of a new file) before FileHandle::OpenExisting. On the PS5's /mnt/ext1 (a USB drive,
+    exFAT: homebrew guides) that is a directory entry removed and another one made, each a
+    metadata write of the directory and the allocation table. HostPathEntry::Truncate (fopen "wb"
+    of the existing file) gives the same file, empty, under the same entry: only its clusters
+    freed, no directory entry touched. The stock code already uses it when the delete fails; this
+    tries it first and keeps delete + create as the fallback (entries without Truncate: other
+    devices, read-only, directories). The game sees the same thing: FileAction::kOverwritten, an
+    empty file opened with the access it asked for.
+    """
+    vfs = sdk / "src" / "filesystem" / "virtual_file_system.cpp"
+    edit(vfs,
+         "        // Overwrite by delete + recreate, or truncate if delete fails\n"
+         "        // (host file may be briefly locked by cloud sync, AV, etc.).\n"
+         "        if (entry->Delete()) {\n"
+         "          entry = nullptr;\n"
+         "        } else if (!entry->Truncate()) {\n"
+         "          return X_STATUS_ACCESS_DENIED;\n"
+         "        }\n",
+         "        // [mgr] Overwrite by truncating in place (no directory entry removed and made again:\n"
+         "        // 290 ms for a save on the PS5's USB drive, mgr_025 17:02:30), or by delete +\n"
+         "        // recreate where the entry can't be truncated (ci/patch_framework.py overwrite_in_place).\n"
+         "        if (entry->Truncate()) {\n"
+         "        } else if (entry->Delete()) {\n"
+         "          entry = nullptr;\n"
+         "        } else {\n"
+         "          return X_STATUS_ACCESS_DENIED;\n"
+         "        }\n")
 
 
 def wait_diag(sdk):

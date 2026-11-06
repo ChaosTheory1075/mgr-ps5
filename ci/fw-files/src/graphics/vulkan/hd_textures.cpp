@@ -45,6 +45,7 @@
 #include <xxhash.h>
 
 #include <rex/cvar.h>
+#include <rex/frame_stats.h>
 #include <rex/logging.h>
 #include <rex/mgr_perf.h>
 #include <rex/graphics/vulkan/command_processor.h>
@@ -358,6 +359,13 @@ bool ApplyPatch(const HdGuest& g, HdDds& d) {
 
 // The file reader thread: reads the DDS files the GPU thread asks for.
 void HdReaderMain(HdReplacer* hd) {
+#if defined(__PROSPERO__)
+  // (off CPU 0: Hd() starts this thread from the GPU thread on the first texture load, after that
+  // thread took CPU 0 for itself, and a new thread keeps its creator's CPUs. A std::thread is not
+  // in ps5diag's list, so nothing moves it later. Its file reads go on the other threads' CPUs,
+  // as the pipeline cache saver's: Stranglehold 8048d4d.)
+  rex::frame_stats::scePthreadSetaffinity(pthread_self(), 0x1FCC);
+#endif
   for (;;) {
     uint64_t hash;
     {
