@@ -366,10 +366,11 @@ void MgrApp::OnPreSetup(rex::RuntimeConfig& config) {
   // What one draw costs on the GPU thread, step by step: the "draw cost" line every 10 s (for the
   // ports' shared per-draw work, Downloads\Recomps\PERF-COLLECTIVE.md). Timing only.
   if (!rex::cvar::HasNonDefaultValue("gpu_draw_profile")) rex::cvar::SetLaunchFlag("gpu_draw_profile", "true");
-  // Constant writes that change no value invalidate nothing (the same pixels, less per-draw work);
-  // 2: on and off in alternate 10 s windows, so one run measures it on the same scene. 1 once proven.
+  // The speed pack's constant-write skip stays OFF in the user's build (supervisor order 2026-11-06,
+  // PERF-COLLECTIVE.md): the same package's "2" (on and off every 10 s) shipped in Driver SF when its
+  // picture broke. No self-toggling A/B mode in a user build; measure in a separate test build.
   if (!rex::cvar::HasNonDefaultValue("gpu_skip_unchanged_writes"))
-    rex::cvar::SetLaunchFlag("gpu_skip_unchanged_writes", "2");
+    rex::cvar::SetLaunchFlag("gpu_skip_unchanged_writes", "0");
   // The stall sampler (SIGPROF to every thread once no frame has come for 300
   // ms) is armed by the FPS counter's frame count, and froze Crackdown's loads.
   if (!rex::cvar::HasNonDefaultValue("ps5_hang_reports")) rex::cvar::SetLaunchFlag("ps5_hang_reports", "false");

@@ -2095,7 +2095,10 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
     # WAIT_REG_MEM polled before sleeping, the submit thread (CPU 5: the lane's twin, free here)
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
     import fw_speed_pack
-    fw_speed_pack.apply(sdk, edit, cpu=5,
+    # skip_default=0 and submit_default=False (supervisor order 2026-11-06): the skip and the submit
+    # thread are OFF until proven; the submit thread's ordering against resolves and EDRAM copies is
+    # not yet proven in code (Driver SF's picture broke with the same package on).
+    fw_speed_pack.apply(sdk, edit, cpu=5, skip_default=0, submit_default=False,
                         perf_scope="rex::mgr_perf::Scope mgr_perf_submit_wait(rex::mgr_perf::kSubmit);")
 
 
