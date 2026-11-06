@@ -1,7 +1,10 @@
 // Metal Gear Rising: Revengeance - ReXGlue recompiled app (see mgr_app.h).
 #include "mgr_app.h"
 
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <mutex>
 #include <system_error>
 #include <unordered_set>
@@ -307,6 +310,55 @@ extern "C" void sub_82BFCB68(PPCContext& __restrict ctx, uint8_t* base) {
     return;
   }
   __imp__sub_82BFCB68(ctx, base);
+}
+
+// The camera, for a FIELD OF VIEW row (log only for now: nothing the game does changes).
+// The game camera is one static object at 838CD740, as the PC's at exe+17EA1D0 (IPG Xapek's
+// cheat table: FOV +4F8 in radians, roll +4E8, position +4C0): its target FOV at +4F8 (the
+// camera's init, sub_8290B5E8, sets 50 degrees from 8217F338), the current one at +4A8 (the
+// camera step, sub_828F0D00, once a frame: blends the target in over a transition, +380 of
+// +37C, the curve by the mode at +8C8, else copies it), which 46 places read. The event
+// camera (sub_83195E20) sets the target from its own data at 83195F58, then calls
+// sub_8290D108. Which state marks a cutscene isn't proven from code, so a run logs it: each
+// change of the camera's mode and FOVs, and each event-camera FOV.
+namespace {
+constexpr uint32_t kCamera = 0x838CD740;
+float GuestFloat(uint8_t* base, uint32_t address) {
+  const uint32_t bits = REX_LOAD_U32(address);
+  float value;
+  std::memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+float Degrees(float radians) { return radians * 57.29578f; }
+}  // namespace
+
+extern "C" void sub_828F0D00(PPCContext& __restrict ctx, uint8_t* base) {
+  __imp__sub_828F0D00(ctx, base);
+  static uint32_t last_mode = ~0u, last_flag = ~0u, lines = 0;
+  static int last_target = -1, last_current = -1;
+  const uint32_t mode = REX_LOAD_U32(kCamera + 0x8C8), flag = REX_LOAD_U32(kCamera + 0x584);
+  const float target = Degrees(GuestFloat(base, kCamera + 0x4F8));
+  const float current = Degrees(GuestFloat(base, kCamera + 0x4A8));
+  if (!std::isfinite(target) || !std::isfinite(current)) return;
+  const int target10 = int(std::lround(target * 10)), current10 = int(std::lround(current * 10));
+  // (a change of a degree or more, or of the mode words: not every frame of a transition)
+  if (mode == last_mode && flag == last_flag && std::abs(target10 - last_target) < 10 &&
+      std::abs(current10 - last_current) < 10) {
+    return;
+  }
+  last_mode = mode, last_flag = flag, last_target = target10, last_current = current10;
+  if (lines++ < 400) {
+    REXLOG_INFO("Metal Gear Rising: camera FOV target {:.1f} current {:.1f} (mode {} flag {})", target, current, mode,
+                flag);
+  }
+}
+
+extern "C" void sub_8290D108(PPCContext& __restrict ctx, uint8_t* base) {
+  static uint32_t lines = 0;
+  if (lines++ < 200) {
+    REXLOG_INFO("Metal Gear Rising: event camera FOV {:.1f}", Degrees(GuestFloat(base, kCamera + 0x4F8)));
+  }
+  __imp__sub_8290D108(ctx, base);
 }
 
 namespace {
