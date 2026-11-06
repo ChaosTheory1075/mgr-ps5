@@ -52,6 +52,9 @@ CONTENT   the game, Title Update 4 and the DLC: installed or not, X installs
           one from install/, triangle (twice) uninstalls it.
 SAVES     BACK UP SAVES (to install/backups/), IMPORT an Xbox 360 save
           package from install/, RESTORE one of the backups.
+          SEND LOGS: for a bug report. Type what went wrong; the app's logs
+          go to catbox.moe and a link and a QR code come back. The QR code
+          opens a GitHub issue with it all filled in. Needs the internet.
 SETTINGS  GRAPHICS
           UPSCALING         FSR 1 (AMD's upscaler, the default) or bilinear:
                             how the picture is enlarged to the TV (up to 4K).
@@ -79,12 +82,20 @@ SETTINGS  GRAPHICS
                             for the quick menu - INFINITE HEALTH, INFINITE
                             FUEL CELLS, the FPS counter, the DualSense.
                             O or L3 + R3 closes it.
+          FIELD OF VIEW     OFF, +10, +20 or +30 degrees for the gameplay
+                            camera; cutscenes keep their own framing.
           EXPERIMENTAL
           RENDERER          ACCURATE (the default) or FAST: drawn with the
                             PS5's own render targets, quicker but some effects
                             may draw wrong.
           AUDIO
           MENU MUSIC        the menu song's level.
+          SQUARE (twice) puts back the recommended settings, the ones the
+          port was tested with: FSR 1 at HIGH sharpness, SMAA, 16x
+          filtering, GPU HELPER on, PlayStation prompts, DualSense on at
+          HIGH, FPS counter off, LANGUAGE AUTO, SKIP INTRO, HD CUTSCENES and
+          CHEAT MENU on, FIELD OF VIEW +20, RENDERER FAST. Your menu music
+          level and the quick menu's cheats stay as they are.
 TROPHIES  every achievement, earned ones first, with their dates (filled in
           once the game has been started once).
 CREDITS   who made it possible.
@@ -116,7 +127,7 @@ Problems
 - The home screen tile, background or music didn't change after an update:
   restart the PS5 (it caches them).
 - A log of every run is written to PPSA48080/logs/. Send the newest one with
-  any report.
+  any report, or use SAVES > SEND LOGS.
 
 Credits
 -------
