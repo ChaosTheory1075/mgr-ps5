@@ -207,6 +207,7 @@ struct Settings {
   bool cheat_menu = true;        // L3 + R3 opens the quick menu (mgr_cheat_menu: mgr_quick_menu.h)
   bool cheat_health = false;     // the quick menu's cheats, as it left them (mgr_cheat_health, mgr_cheat_fuel)
   bool cheat_fuel = false;
+  int fov = 0;                   // FIELD OF VIEW: degrees added to the gameplay camera, 0/10/20/30 (mgr_fov_extra)
 
   static constexpr const char* kFilterNames[] = {"", "", "2X", "4X", "8X", "16X"};
   static constexpr const char* kAaNames[] = {"OFF", "FXAA", "SMAA"};
@@ -252,6 +253,7 @@ struct Settings {
         if (k == "cheat_menu") s.cheat_menu = value != 0;
         if (k == "cheat_health") s.cheat_health = value != 0;
         if (k == "cheat_fuel") s.cheat_fuel = value != 0;
+        if (k == "field_of_view") s.fov = std::clamp(value / 10 * 10, 0, 30);
       }
       std::fclose(f);
     }
@@ -264,11 +266,11 @@ struct Settings {
                    "language = %d\nanti_aliasing = %d\nupscaling_fsr = %d\nfsr_sharpness = %d\nrenderer_fast = %d\n"
                    "texture_filtering = %d\ngpu_lane = %d\nmenu_music = %d\nps_buttons = %d\ndualsense = %d\n"
                    "dualsense_strength = %d\nfps_counter = %d\nlightbar_effects = %d\nskip_intro = %d\n"
-                   "hd_cutscenes = %d\ncheat_menu = %d\ncheat_health = %d\ncheat_fuel = %d\n",
+                   "hd_cutscenes = %d\ncheat_menu = %d\ncheat_health = %d\ncheat_fuel = %d\nfield_of_view = %d\n",
                    kLanguages[language].xbox, aa, fsr ? 1 : 0, sharpness, host_rts ? 1 : 0, filter, lane ? 1 : 0,
                    music, ps_buttons ? 1 : 0, dualsense ? 1 : 0,
                    dualsense_strength, fps_counter, lightbar_effects ? 1 : 0, skip_intro ? 1 : 0,
-                   hd_movies ? 1 : 0, cheat_menu ? 1 : 0, cheat_health ? 1 : 0, cheat_fuel ? 1 : 0);
+                   hd_movies ? 1 : 0, cheat_menu ? 1 : 0, cheat_health ? 1 : 0, cheat_fuel ? 1 : 0, fov);
       std::fclose(f);
     }
   }
@@ -312,12 +314,14 @@ struct Settings {
     rex::cvar::SetFlagByName("mgr_cheat_menu", cheat_menu ? "true" : "false");
     rex::cvar::SetFlagByName("mgr_cheat_health", cheat_menu && cheat_health ? "true" : "false");
     rex::cvar::SetFlagByName("mgr_cheat_fuel", cheat_menu && cheat_fuel ? "true" : "false");
+    rex::cvar::SetFlagByName("mgr_fov_extra", std::to_string(fov));
     const int xbox_language = XboxLanguage();
     rex::cvar::SetFlagByName("user_language", std::to_string(xbox_language));
     SetLanguage(xbox_language);  // (the quick menu's and the trophy pop-up's text)
     REXLOG_INFO("Metal Gear Rising: Revengeance menu: language {} (Xbox 360 language {}), cheat menu {} (health "
-                "{}, fuel {})", kLanguages[language].name, xbox_language, cheat_menu ? "on" : "off",
-                cheat_menu && cheat_health ? "on" : "off", cheat_menu && cheat_fuel ? "on" : "off");
+                "{}, fuel {}), field of view +{}", kLanguages[language].name, xbox_language,
+                cheat_menu ? "on" : "off", cheat_menu && cheat_health ? "on" : "off",
+                cheat_menu && cheat_fuel ? "on" : "off", fov);
     REXLOG_INFO("Metal Gear Rising: Revengeance menu: upscaling {} (sharpness {}), anti-aliasing {}, texture filtering {}, "
                 "the GPU's second lane {}, renderer {}, {} button icons, DualSense features {} (strength {}), FPS counter {}",
                 fsr ? "FSR 1" : "bilinear", kSharpnessNames[sharpness], kAaNames[aa], kFilterNames[filter],
@@ -435,7 +439,7 @@ const char* PageName(int page) {
 // in SettingsLines and its change in ChangeSetting).
 enum SettingsRow {
   kUpscaling, kSharpness, kAntiAliasing, kFiltering, kLane, kFpsCounter, kButtons, kDualSense, kDualSenseStrength,
-  kLightBar, kLanguageRow, kSkipIntro, kHdMovies, kCheatMenu, kRenderer, kMusic, kSettingsRows
+  kLightBar, kLanguageRow, kSkipIntro, kHdMovies, kCheatMenu, kFov, kRenderer, kMusic, kSettingsRows
 };
 
 class MenuDialog final : public rex::ui::ImGuiDialog {
@@ -746,6 +750,12 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
                            "VIDA INFINITA, CÉLULAS DE ENERGIA INFINITAS (Blade Mode e Ripper Mode sem fim), o contador "
                            "de FPS e os recursos do DualSense. O ou L3 + R3 de novo fecha. DESLIGADO: L3 + R3 não faz "
                            "nada e as trapaças ficam desligadas.")};
+    lines[kFov] = {game, T("FIELD OF VIEW", "CAMPO DE VISÃO"),
+                   settings_.fov ? "+" + std::to_string(settings_.fov) : std::string(off), true,
+                   T("Widens the camera while you play, by 10, 20 or 30 degrees, so more of the fight around "
+                     "Raiden is on screen. Cutscenes keep their own framing. OFF is the Xbox 360's.",
+                     "Abre a câmera enquanto você joga, em 10, 20 ou 30 graus, para mostrar mais da luta ao "
+                     "redor do Raiden. As cenas mantêm o enquadramento original. DESLIGADO é o do Xbox 360.")};
     lines[kSkipIntro] = {game, T("SKIP INTRO", "PULAR INTRODUÇÃO"), settings_.skip_intro ? on : off, true,
                          T("Go straight to the title screen, without the Konami, Kojima Productions, PlatinumGames "
                            "and other logos at the start.",
@@ -850,6 +860,10 @@ class MenuDialog final : public rex::ui::ImGuiDialog {
         break;
       case kSkipIntro:
         if (flip) settings_.skip_intro = !settings_.skip_intro;
+        break;
+      case kFov:
+        if (cross) settings_.fov = settings_.fov >= 30 ? 0 : settings_.fov + 10;
+        settings_.fov = std::clamp(settings_.fov + 10 * step, 0, 30);
         break;
       case kHdMovies:
         if (flip && hd_movies_) settings_.hd_movies = !settings_.hd_movies;

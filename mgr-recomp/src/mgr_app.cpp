@@ -1,6 +1,8 @@
 // Metal Gear Rising: Revengeance - ReXGlue recompiled app (see mgr_app.h).
 #include "mgr_app.h"
 
+#include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -332,8 +334,54 @@ float GuestFloat(uint8_t* base, uint32_t address) {
 float Degrees(float radians) { return radians * 57.29578f; }
 }  // namespace
 
+// FIELD OF VIEW (degrees added to the gameplay camera, menu row; 0 = the Xbox 360's). Gameplay
+// only by construction: the gameplay camera's states set the target FOV to its default (the 12
+// camera-module writers that store 8217F338's 50 degrees: 828E9A30, 828EA634, 828EF15C, 828EF1C0,
+// 828EF818, 828F79D0, 828F9054, 8290A4B0, 8290B6F4, 8290BAC0, 8290BC34, 8290CB34); the event
+// (cutscene) camera writes its own FOV (83195F58) and calls sub_8290D108. So the current FOV is
+// widened after the camera step only while the target is that default and no event-camera FOV is
+// in place (held from sub_8290D108 until the target changes), and put back before the next step,
+// so the camera's own blending and the event camera never see the change.
+REXCVAR_DEFINE_INT32(mgr_fov_extra, 0, "Metal Gear Rising", "Degrees added to the gameplay camera's field of view")
+    .range(0, 30);
+
+namespace {
+constexpr uint32_t kDefaultFov = 0x8217F338;
+uint32_t g_fov_widened_bits = 0, g_fov_authored_bits = 0;  // (the camera step's thread only)
+std::atomic<uint32_t> g_event_fov_bits{0};
+std::atomic<bool> g_event_fov_held{false};
+}  // namespace
+
 extern "C" void sub_828F0D00(PPCContext& __restrict ctx, uint8_t* base) {
+  // (last frame's widening put back first, unless the game wrote the current FOV since)
+  if (g_fov_widened_bits && REX_LOAD_U32(kCamera + 0x4A8) == g_fov_widened_bits) {
+    REX_STORE_U32(kCamera + 0x4A8, g_fov_authored_bits);
+  }
+  g_fov_widened_bits = 0;
   __imp__sub_828F0D00(ctx, base);
+  const uint32_t target_bits = REX_LOAD_U32(kCamera + 0x4F8);
+  if (g_event_fov_held.load(std::memory_order_relaxed) &&
+      target_bits != g_event_fov_bits.load(std::memory_order_relaxed)) {
+    g_event_fov_held.store(false, std::memory_order_relaxed);
+  }
+  const int32_t extra = REXCVAR_GET(mgr_fov_extra);
+  if (extra > 0 && target_bits == REX_LOAD_U32(kDefaultFov) && !g_event_fov_held.load(std::memory_order_relaxed)) {
+    const uint32_t current_bits = REX_LOAD_U32(kCamera + 0x4A8);
+    float current;
+    std::memcpy(&current, &current_bits, sizeof(current));
+    if (std::isfinite(current) && current > 0.17f && current < 2.1f) {  // (10 to 120 degrees)
+      const float wide = std::min(current + float(extra) * 0.017453292f, 2.4f);
+      uint32_t wide_bits;
+      std::memcpy(&wide_bits, &wide, sizeof(wide_bits));
+      REX_STORE_U32(kCamera + 0x4A8, wide_bits);
+      g_fov_authored_bits = current_bits, g_fov_widened_bits = wide_bits;
+      static uint32_t logged = 0;
+      if (logged++ < 3) {
+        REXLOG_INFO("Metal Gear Rising: field of view {:.1f} -> {:.1f} (FIELD OF VIEW +{})", Degrees(current),
+                    Degrees(wide), extra);
+      }
+    }
+  }
   static uint32_t last_mode = ~0u, last_flag = ~0u, lines = 0;
   static int last_target = -1, last_current = -1;
   const uint32_t mode = REX_LOAD_U32(kCamera + 0x8C8), flag = REX_LOAD_U32(kCamera + 0x584);
@@ -354,6 +402,9 @@ extern "C" void sub_828F0D00(PPCContext& __restrict ctx, uint8_t* base) {
 }
 
 extern "C" void sub_8290D108(PPCContext& __restrict ctx, uint8_t* base) {
+  // (the event camera has just set its FOV: no widening while it holds)
+  g_event_fov_bits.store(REX_LOAD_U32(kCamera + 0x4F8), std::memory_order_relaxed);
+  g_event_fov_held.store(true, std::memory_order_relaxed);
   static uint32_t lines = 0;
   if (lines++ < 200) {
     REXLOG_INFO("Metal Gear Rising: event camera FOV {:.1f}", Degrees(GuestFloat(base, kCamera + 0x4F8)));
