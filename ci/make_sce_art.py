@@ -62,12 +62,14 @@ def picture(w, h, title_size, sub_size):
     return img
 
 
-# The icon's (the cover's) MAX PAYNE, as fractions of the picture: left, top, right, bottom.
+# The icon's title, as fractions of the picture: left, top, right, bottom. (These are Max Payne 3's
+# cover numbers, from the script this one copies. MGR never uses --icon: its art comes ready-made
+# from Extras/app-assets/sce_sys. Measure MGR's cover before ever passing --icon here.)
 ICON_TITLE = (0.012, 0.545, 0.875, 0.69)
 
 
 def red_title_box(img):
-    """The background's red MAX PAYNE: the box round its pure red pixels."""
+    """The background's red title: the box round its pure red pixels (unused by MGR, as above)."""
     import numpy as np
 
     a = np.asarray(img.convert("RGB")).astype(int)

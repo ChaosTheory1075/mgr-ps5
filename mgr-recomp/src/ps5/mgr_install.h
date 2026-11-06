@@ -59,7 +59,7 @@ struct Source {
 };
 
 struct SaveInfo {
-  std::string name;   // the save's folder (MP3_PROGRESSION, ...)
+  std::string name;   // the save's folder (its name in the content folder; MGR_SAVE when a save file gives none)
   int64_t modified = 0;  // (seconds since 1970)
 };
 
