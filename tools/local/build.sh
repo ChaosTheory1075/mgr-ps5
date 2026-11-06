@@ -76,7 +76,7 @@ gen_key=$( (git -C "$W/fw-pristine" rev-parse HEAD; cat ci/pc_patches.py ci/fw_p
   sha256sum | cut -c1-16)
 if [ ! -d "$W/gen/$gen_key/generated" ]; then
   step "rexglue CLI (host)"
-  rsync -a --checksum --delete "$W/fw-new/" "$W/fw-host/"
+  rsync -rlpgoD --checksum --delete "$W/fw-new/" "$W/fw-host/"
   cmake -S "$W/fw-host/glue/rexglue-sdk-main" -B "$W/build-rexglue" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 \
     -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -111,7 +111,7 @@ cp "$W/gen/$gen_key/mgr_config.toml" "$W/fw-new/$M/mgr_config.toml"
 
 # ---- the PS5 program ----
 step "sync framework (by content)"
-rsync -a --checksum --delete "$W/fw-new/" "$W/ws/fw/"
+rsync -rlpgoD --checksum --delete "$W/fw-new/" "$W/ws/fw/"
 rm -rf "$W/fw-new"
 SDK=$W/tri/.deps/native/ps5-payload-sdk
 if [ ! -f out/ps5/build.ninja ]; then
