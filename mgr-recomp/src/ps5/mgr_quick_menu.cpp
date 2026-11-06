@@ -154,6 +154,9 @@ void Change(int row, bool back) {
     default: {
       const bool on = !rex::input::sony::GetOptions().enabled;
       rex::input::sony::SetFeaturesEnabled(on);
+      // (SetFeaturesEnabled turns the touchpad gestures on with the rest: off again, as the menu sets them;
+      // they're GTA IV's weapon and radio swipes)
+      rex::cvar::SetFlagByName("gta4_sony_gestures", "false");
       SetMenuValue("dualsense", on ? 1 : 0);
       break;
     }
