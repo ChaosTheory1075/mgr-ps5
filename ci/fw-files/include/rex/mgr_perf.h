@@ -36,11 +36,22 @@ enum Counter : uint32_t {
   kDrawShaders,   // in draws: submission, shader modifications and translations, samplers
   kDynState,      // in draws: pipeline layout, viewport and dynamic state
   kRecord,        // in draws: index buffer bind and the draw recorded
+  kConstWrite,    // (count only) shader / fetch / bool / loop constant register writes
+  kConstSkip,     // (count only) ... of them, every value already there: nothing invalidated
   kCount
 };
 
+// gpu_skip_unchanged_writes 2 (alternate): whether the skip is on in this 10 s window (the GPU
+// thread's report flips it).
+inline bool g_skip_window_on = true;
+
 inline std::atomic<uint64_t> g_ns[kCount];
 inline std::atomic<uint64_t> g_n[kCount];
+
+// (a count from the GPU thread only: no locked instruction)
+inline void CountOnGpuThread(Counter c) {
+  g_n[c].store(g_n[c].load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+}
 
 // The draw profile (gpu_draw_profile): IssueDraw's time by step, in CPU ticks (rdtsc: a few ns
 // to read, where the steady clock can be a system call), each step exclusive. The 10 s report
