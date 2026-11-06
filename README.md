@@ -29,6 +29,8 @@ the Xbox 360.
 - Installs the game, Title Update 4 and the DLC from your own files, at the drive's full speed
 - Imports your Xbox 360 saves, backs up and restores saves
 - A menu with HOME, CONTENT, SAVES, SETTINGS, TROPHIES and CREDITS pages, its own art and music
+- Bug reports from the PS5: SAVES > SEND LOGS uploads the logs with what you type, and a QR code opens
+  a GitHub issue here with it all filled in
 
 ## What you need
 - A jailbroken PS5 that runs homebrew apps, with a payload loader on port 9021 (etaHEN or elfldr)
@@ -95,7 +97,8 @@ The build checks the two files by their SHA-1s. It applies `ci/pc_patches.py`,
 - **chronicer**: [mgrCheatSamQTE](https://github.com/chronicer/mgrCheatSamQTE), whose PC game
   structures pointed the way to the cheats
 - Built with the PS5 Payload SDK, Mesa RADV, Dear ImGui, stb_image, dr_mp3, and the Oswald and Inter
-  fonts (SIL Open Font License)
+  fonts (SIL Open Font License); SMAA, AMD FidelityFX FSR 1, Project Nayuki's QR Code generator, and libcurl with
+  OpenSSL for SEND LOGS (see THIRD_PARTY.md)
 - Special thanks to **PlatinumGames** and **Kojima Productions**, for Metal Gear Rising
 
 ## License

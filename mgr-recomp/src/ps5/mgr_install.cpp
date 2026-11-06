@@ -358,6 +358,7 @@ void RemoveSource(const fs::path& path) {
 // and moves it into place. With no payload loader, the app copies by itself (slowly).
 
 constexpr const char* kPayloadElf = "payloads/mgr-ps5-installer.elf";
+constexpr const char* kLogsElf = "payloads/mgr-ps5-logs.elf";  // (the same with libcurl: SEND LOGS)
 constexpr const char* kJobRel = "UserData/mgr/.install-job";
 constexpr const char* kStagingRel = "UserData/mgr/.install-staging";
 
@@ -416,7 +417,7 @@ double Age(const fs::path& path) {
 }
 
 struct PayloadStatus {
-  std::string token, phase, error, drive;
+  std::string token, phase, error, drive, result;
   uint64_t copy_done = 0, copy_total = 0, write_bytes = 0, write_ns = 0, beat = 0;
   bool Working() const { return phase != "done" && phase != "failed" && phase != "stopped"; }
 };
@@ -428,6 +429,7 @@ bool ReadStatus(const fs::path& dir, PayloadStatus& s) {
   s.phase = Field(text, "phase");
   s.error = Field(text, "error");
   s.drive = Field(text, "drive");
+  s.result = Field(text, "result");
   s.copy_done = Number(text, "copy_done");
   s.copy_total = Number(text, "copy_total");
   s.write_bytes = Number(text, "write_bytes");
@@ -497,11 +499,14 @@ enum class Ran {
 
 // One job (`body`: its fields, the token aside) written by the payload; `done`/`total` follow its
 // copying. kDone: what it wrote is in the staging folder, marked as this job's.
+// (`result` given: a job that stages nothing - sending the logs - and kDone gives what it answered; `elf_rel`: which
+// payload, as Max Payne 3 RePrescribed's)
 Ran ByPayload(const fs::path& app, const std::string& body, std::atomic<uint64_t>& done,
-              std::atomic<uint64_t>& total, std::string& error) {
+              std::atomic<uint64_t>& total, std::string& error, std::string* result = nullptr,
+              const char* elf_rel = kPayloadElf) {
   std::string elf;
-  if (!ReadText(app / kPayloadElf, elf) || elf.size() < 64 || elf.compare(0, 4, "\x7F" "ELF") != 0) {
-    REXLOG_WARN("Metal Gear Rising: Revengeance install: the installer payload ({}) is missing from the app", kPayloadElf);
+  if (!ReadText(app / elf_rel, elf) || elf.size() < 64 || elf.compare(0, 4, "\x7F" "ELF") != 0) {
+    REXLOG_WARN("Metal Gear Rising: Revengeance install: the installer payload ({}) is missing from the app", elf_rel);
     return Ran::kUnavailable;
   }
   const fs::path dir = JobDir(app);
@@ -563,6 +568,10 @@ Ran ByPayload(const fs::path& app, const std::string& body, std::atomic<uint64_t
       if (s.phase == "done") {
         std::string mark;
         ClearJob(dir);
+        if (result) {
+          *result = s.result;
+          return Ran::kDone;
+        }
         if (!ReadText(Staging(app) / ".token", mark) || mark != token) {
           error = "the installed files aren't from this install";
           return Ran::kFailed;
@@ -1249,6 +1258,46 @@ bool Job::Backup(const fs::path& app) {
                                            "menu.ini.\nRestore it from the menu's SAVES page.\n";
     result = T("Backed up to install/backups/", "Backup feito em install/backups/") + dest.filename().string() + ".";
     return true;
+  });
+}
+
+// The logs (<app>/logs), uploaded by the installer payload for a bug report: the result is the link
+// to pass on. (Only a payload can reach the internet by name: ps5/payload/installer, logs(); Max Payne 3
+// RePrescribed's SEND LOGS.)
+bool Job::SendLogs(const fs::path& app, const std::string& note) {
+  std::string line = note;  // (a field of the job: one line)
+  for (char& c : line)
+    if (c == '\n' || c == '\r') c = ' ';
+  return Start(T("Sending the logs", "Enviando os logs"), [this, app, line](std::string& result) {
+    rex::FlushLogging();  // (this run's log so far, on the drive first)
+    std::string error, link;
+    switch (ByPayload(app, "kind=logs\nnote=" + line + "\n", done_, total_, error, &link, kLogsElf)) {
+      case Ran::kDone: {
+        if (link.empty()) {
+          result = T("The logs were sent, but no link came back. Try again.",
+                     "Os logs foram enviados, mas nenhum link voltou. Tente de novo.");
+          return false;
+        }
+        const size_t scheme = link.find("://");
+        const std::string shown = scheme == std::string::npos ? link : link.substr(scheme + 3);
+        {
+          std::lock_guard<std::mutex> lock(mutex_);
+          logs_link_ = shown;
+        }
+        result = T("Logs sent. Give the developer this link:  ", "Logs enviados. Passe este link para o desenvolvedor:  ") +
+                 shown;
+        return true;
+      }
+      case Ran::kUnavailable:
+        result = T("The logs can only be sent with a payload loader running (etaHEN or elfldr, port 9021). Or copy "
+                   "PPSA48080/logs/ off the PS5 by FTP.",
+                   "Os logs só podem ser enviados com um carregador de payload rodando (etaHEN ou elfldr, porta 9021). "
+                   "Ou copie PPSA48080/logs/ do PS5 por FTP.");
+        return false;
+      default:
+        result = T("The logs couldn't be sent: ", "Não deu para enviar os logs: ") + error;
+        return false;
+    }
   });
 }
 

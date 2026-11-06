@@ -18,6 +18,9 @@ This app is GPL-3.0 (see LICENSE). It contains, or is built from:
 | AMD FidelityFX FSR 1 | UPSCALING FSR 1 and SHARPNESS | MIT |
 | Oswald, Inter (fonts) | the menus' text | SIL Open Font License 1.1 |
 | PS5 AT9 Converter (BlackBearReloaded) | the home screen music's encoding | see its repository |
+| QR Code generator (Project Nayuki) | SAVES > SEND LOGS's QR code | MIT |
+| libcurl (Daniel Stenberg and contributors) | SAVES > SEND LOGS's upload (payloads/mgr-ps5-logs.elf) | curl (MIT-style) |
+| OpenSSL | the upload's encryption (payloads/mgr-ps5-logs.elf) | Apache-2.0 |
 
 No game files are included: you need your own copy of Metal Gear Rising: Revengeance for the Xbox 360.
 Metal Gear and every related name belong to their owners.
