@@ -703,8 +703,12 @@ void VulkanTextureCache::HdAfterLoad(VulkanTexture& texture, bool load_base) {
   texture.hd_head = head;
   if (texture.hd_replacement && texture.hd_replacement->hash == hash) return;
   if (!hd->available.count(hash)) {
-    // (each hash's first miss, of 32x32 and up, to compare with tools/mgr_texture_pack.py)
-    if (hd->logged.size() < 6000 && key.GetWidth() >= 32 && key.GetHeight() >= 32 && hd->logged.insert(hash).second) {
+    // (each hash's first miss, of 32x32 and up, to compare with tools/mgr_texture_pack.py: only with
+    // hd_textures_log_misses on. It was on in every build: ~900 lines at each new scene, written
+    // synchronously from the GPU thread to stdout, the log file and the kernel debug output (mgr_025:
+    // 909, mgr_026), for the texture pack's list, which is done)
+    if (REXCVAR_GET(hd_textures_log_misses) && hd->logged.size() < 6000 && key.GetWidth() >= 32 &&
+        key.GetHeight() >= 32 && hd->logged.insert(hash).second) {
       ++hd->misses_logged;
       REXGPU_INFO("HD textures: miss {:016x} format {} {}x{} tiled {} pitch {} packed {} mips {} base {:08X} size {:X} "
                   "head {:016x}",
