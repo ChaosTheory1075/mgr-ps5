@@ -1774,8 +1774,14 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
     # in <cache>/shaders, as gta4-ps5's own renderer keeps one): without it
     # every session compiled every pipeline again, and the stutters in
     # gameplay were those compiles (mgr_008.log: each drop a burst of
-    # "Creating graphics pipeline state"). Saved from the GPU thread's 10 s
-    # report when new pipelines were made, written on a thread of its own.
+    # "Creating graphics pipeline state"). Loaded at start, NEVER saved in play: the periodic
+    # save (vkGetPipelineCacheData of 21 MB + a 21 MB write to the USB drive) was a ~300 ms
+    # hitch every time, whatever the number of new pipelines (mgr_025 17:00:06 / 17:01:06 /
+    # 17:02:16; mgr_026 17:24:19 in play and 17:26:09 in a cutscene, still there with the
+    # saver thread off CPU 0). Pipelines made since are kept by RADV's own disk cache
+    # (radv-shader-cache/mesa_shader_cache_db, written incrementally in small entries), so the
+    # next session's creations of them are cache hits; the pipeline descriptions themselves are
+    # stored by the storage write thread (.xpso) as before.
     edit(vpc2,
          "namespace rex::graphics::vulkan {\n",
          "namespace rex::graphics::vulkan {\n\n"
@@ -1784,8 +1790,6 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
          "VkPipelineCache mgr_vk_cache = VK_NULL_HANDLE;\n"
          "const ui::vulkan::VulkanDevice* mgr_vk_cache_device = nullptr;\n"
          "std::string mgr_vk_cache_path;\n"
-         "std::atomic<uint32_t> mgr_vk_cache_new{0};\n"
-         "std::atomic<bool> mgr_vk_cache_saving{false};\n"
          "void MgrOpenPipelineCache(const ui::vulkan::VulkanDevice* device, const std::filesystem::path& path) {\n"
          "  if (mgr_vk_cache != VK_NULL_HANDLE || !device) return;\n"
          "  std::vector<uint8_t> data;\n"
@@ -1815,51 +1819,9 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
          "              data.size() >> 10, mgr_vk_cache_path);\n"
          "}\n"
          "}  // namespace\n\n"
-         "// From the GPU thread's 10 s report: saved when pipelines were made since.\n"
-         "void MgrSavePipelineCache() {\n"
-         "  // (at most once a minute, and all of it on a thread of its own: reading the\n"
-         "  // 13-18 MB cache on the GPU thread every 10 s was a hitch in itself)\n"
-         "  static uint32_t reports = 0;\n"
-         "  if (mgr_vk_cache == VK_NULL_HANDLE || !mgr_vk_cache_new.load() || ++reports < 6) return;\n"
-         "  if (mgr_vk_cache_saving.exchange(true)) return;\n"
-         "  reports = 0;\n"
-         "  const uint32_t made = mgr_vk_cache_new.exchange(0);\n"
-         "  std::thread([made]() {\n"
-         "#if defined(__PROSPERO__)\n"
-         "    // (off CPU 0: a new thread keeps its creator's CPUs, and the GPU thread that starts this\n"
-         "    // one has CPU 0 to itself. Reading out the 21 MB cache there held the GPU thread off its\n"
-         "    // CPU: a ~302 ms hitch 0.5 s before each \"pipeline cache saved\" (mgr_025 17:00:06,\n"
-         "    // 17:01:06, 17:02:16, 17:02:33). Now on the other threads' CPUs, as Stranglehold 8048d4d.)\n"
-         "    rex::frame_stats::scePthreadSetaffinity(pthread_self(), 0x1FCC);\n"
-         "#endif\n"
-         "    const auto& dfn = mgr_vk_cache_device->functions();\n"
-         "    size_t size = 0;\n"
-         "    std::vector<uint8_t> data;\n"
-         "    if (dfn.vkGetPipelineCacheData(mgr_vk_cache_device->device(), mgr_vk_cache, &size, nullptr) == VK_SUCCESS &&\n"
-         "        size) {\n"
-         "      data.resize(size);\n"
-         "      if (dfn.vkGetPipelineCacheData(mgr_vk_cache_device->device(), mgr_vk_cache, &size, data.data()) !=\n"
-         "          VK_SUCCESS)\n"
-         "        data.clear();\n"
-         "      data.resize(std::min(size, data.size()));\n"
-         "    }\n"
-         "    bool ok = false;\n"
-         "    if (!data.empty()) {\n"
-         "      const std::string tmp = mgr_vk_cache_path + \".tmp\";\n"
-         "      if (std::FILE* f = std::fopen(tmp.c_str(), \"wb\")) {\n"
-         "        ok = std::fwrite(data.data(), 1, data.size(), f) == data.size();\n"
-         "        ok = std::fclose(f) == 0 && ok;\n"
-         "      }\n"
-         "      if (ok) ok = std::rename(tmp.c_str(), mgr_vk_cache_path.c_str()) == 0;\n"
-         "    }\n"
-         "    REXGPU_INFO(\"mgr: Vulkan pipeline cache saved ({} KB, {} new pipelines){}\", data.size() >> 10, made,\n"
-         "                ok ? \"\" : \" - FAILED\");\n"
-         "    mgr_vk_cache_saving.store(false);\n"
-         "  }).detach();\n"
-         "}\n")
+         "")
     edit(vpc2, "#include <algorithm>\n",
-         "#include <algorithm>\n#include <cstdio>\n#include <filesystem>\n#include <thread>\n"
-         "#include <rex/frame_stats.h>  // [mgr] (the cache saver's CPUs)\n")
+         "#include <algorithm>\n#include <cstdio>\n#include <filesystem>\n#include <thread>\n")
     edit(vpc2,
          "  auto shader_storage_root = cache_root / \"shaders\";\n"
          "  auto shader_storage_shareable_root = shader_storage_root / \"shareable\";\n",
@@ -1875,14 +1837,7 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
          "  VkResult create_result = dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,\n"
          "                                                         &pipeline_create_info, nullptr, &pipeline);\n",
          "  VkResult create_result = dfn.vkCreateGraphicsPipelines(device, mgr_vk_cache, 1,\n"
-         "                                                         &pipeline_create_info, nullptr, &pipeline);\n"
-         "  if (create_result == VK_SUCCESS && mgr_vk_cache != VK_NULL_HANDLE) mgr_vk_cache_new.fetch_add(1);\n")
-    edit(vcp,
-         "      last_us = now;\n      frames = 0;\n    }\n  }\n",
-         "      last_us = now;\n      frames = 0;\n      MgrSavePipelineCache();  // (pipeline_cache.cpp)\n    }\n  }\n")
-    edit(vcp,
-         "namespace rex::graphics::vulkan {\n\nnamespace {\n",
-         "namespace rex::graphics::vulkan {\n\nvoid MgrSavePipelineCache();  // [mgr] pipeline_cache.cpp\n\nnamespace {\n")
+         "                                                         &pipeline_create_info, nullptr, &pipeline);\n")
 
     # The pipeline description storage (<title>.fsi.vk.xpso) held 229 pipelines
     # in every session since the first ones, though each session made new ones
