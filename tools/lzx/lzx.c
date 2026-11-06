@@ -1,4 +1,4 @@
-/* LZX decoding of Xbox 360 XMemCompress streams (Metal Gear Rising: Revengeance's resources),
+/* LZX decoding of Xbox 360 XMemCompress streams (Max Payne 3's RAGE resources: a tool from that port, unused by MGR's build),
  * after libmspack's lzxd.c. Freestanding: no C library, the caller gives all
  * memory, so it builds as a DLL with nothing but clang and lld.
  *

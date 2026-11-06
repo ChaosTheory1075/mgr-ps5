@@ -1,7 +1,7 @@
 /* Metal Gear Rising: Revengeance RePlatinum - the installer payload: the install's writing, at the drive's full speed.
  *
  * GTA IV for PS5's installer payload (elripalda/gta4-ps5, ps5/payload/installer, itself Recomp
- * Store's copier) made for Crackdown and Metal Gear Rising: Revengeance: the same job and status files, the same disc image and
+ * Store's copier) made for Crackdown and Max Payne 3, used as is by Metal Gear Rising: Revengeance: the same job and status files, the same disc image and
  * content package readers, without GTA IV's archive unpacking. The app sends it to the console's
  * payload loader on port 9021 (etaHEN, elfldr or any other), so the writing happens in a process
  * of its own: the PS5 lets an app write about a gigabyte quickly and then slows it to a few MB/s

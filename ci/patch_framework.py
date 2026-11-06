@@ -929,7 +929,10 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
          "    const uint8_t next_skip = xma::GetPacketSkipCount(next_packet);  // [mgr]\n"
          "    if (next_skip == 0xFF) {\n      break;\n    }\n"
          "    next_packet_index += next_skip + 1;\n")
-    # readback_resolve "fast" (Metal Gear Rising: Revengeance's HDR adaptation reads the
+    # [audit 2026-11-05] Found in Max Payne 3; the clone's rename put MGR's name on it. MGR runs with
+    # readback_resolve "none" (mgr_app.cpp's start line; 295bdd2 dropped MP3's "fast"), so this block
+    # and the 256 KB readback block below never run for MGR. They stay for a port that sets "fast".
+    # readback_resolve "fast" (Max Payne 3's HDR adaptation reads the
     # luminance it resolved on the CPU, Xenia game-compatibility #42) hands
     # the game the previous resolve's buffer without checking that the GPU
     # has written it: the slot can still be queued, or be fresh memory never
@@ -1138,7 +1141,7 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
 
     # A draw whose depth test can never pass and that has stencil off writes
     # nothing (no color, depth or stencil): skip it before it binds render
-    # targets. Metal Gear Rising: Revengeance issues one (depth only, zfunc NEVER) on its depth
+    # targets. Max Payne 3 (where it was found; the clone's rename said MGR) issues one (depth only, zfunc NEVER) on its depth
     # buffer reinterpreted as 640-wide 2x MSAA between the G-buffer and the
     # stencil-tested deferred lighting; on host render targets binding it
     # converts the depth/stencil away and back (lossy) for nothing.
@@ -1164,7 +1167,7 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
 
     # Integer number format (Xenia canary packs and fetches it, this
     # framework's resolve shaders and texture fetch only know fractions).
-    # Metal Gear Rising: Revengeance resolves its HDR scene (7e3) to k_16_16_16_16 with number
+    # Max Payne 3 (where it was found; the clone's rename said MGR) resolves its HDR scene (7e3) to k_16_16_16_16 with number
     # format "unsigned integer" and exponent bias +11 (a 16-bit integer with 11
     # fractional bits) and samples it with num_format integer and exp_adjust
     # -13. Packed as a 0..1 fraction every lit pixel saturated (all white);
@@ -1229,7 +1232,7 @@ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
     # word 3, bits 13:18 (xenos.h, and the DXBC translator). The SPIR-V
     # translator took bits 13:18 of word 4 - part of the LOD bias - so on
     # Vulkan no texture got its exp_adjust, and textures with a LOD bias got a
-    # random scale. Metal Gear Rising: Revengeance reads its HDR scene, bloom and luminance with
+    # random scale. Max Payne 3 (where it was found; the clone's rename said MGR) reads its HDR scene, bloom and luminance with
     # exp_adjust -13 (+16 above for the integer format): every post-processing
     # pass saw the scene 8 times too dark (the dark, grey gameplay).
     sft = sdk / "src" / "graphics" / "pipeline" / "shader" / "spirv_translator_fetch.cpp"

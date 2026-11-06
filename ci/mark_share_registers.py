@@ -5,8 +5,9 @@
 
 With non_volatile_as_local (and cr/ctr/xer) every recompiled function keeps
 those registers in C++ locals, so a piece the analyzer split off its owner
-reads zeros where the owner's registers should be (Metal Gear Rising: Revengeance crashed in its
-first SEH __finally, sub_821F4FD0, reading 0x580(r21)). gta4-ps5's
+reads zeros where the owner's registers should be (Max Payne 3 crashed in its
+first SEH __finally, sub_821F4FD0, reading 0x580(r21): that game's addresses, as is
+sub_8307A488 below; the clone's rename had put MGR's name on them). gta4-ps5's
 read_before_write.py lists the functions that read one before writing it.
 
 Only a function that reads a GPR (or cr/ctr/xer) is marked, and not one with

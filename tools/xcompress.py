@@ -1,6 +1,6 @@
 """Xbox 360 XMemCompress (LZX) streams, through tools/lzx/lzx.dll (lzx.c).
 
-A Metal Gear Rising: Revengeance 360 resource's data: 0x0FF512F1, a big-endian u32 compressed
+A Max Payne 3 360 resource's data (a tool from that port, unused by MGR's build): 0x0FF512F1, a big-endian u32 compressed
 size, then the chunk stream lzx.c decodes.
 """
 import ctypes
